@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Crypto Trade Analyzer — SL Hunt + EMA SSL RSI</title>
+  <meta name="description" content="18-Point Dual Strategy AI Trade Analyzer with real-time Binance data">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #06040e; overflow-x: hidden; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes pulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #06040e; }
+    ::-webkit-scrollbar-thumb { background: #1a1230; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <!-- React CDN -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  
+  <script type="text/babel">
+    const { useState, useCallback, useRef } = React;
+    
+    // ═══ APP CODE INJECTED HERE ═══
+    
+/* ═══════════════════════════════════════════════════════════
+   CRYPTO TRADE ANALYZER — SENIOR EDITION
+   
+   ⚡ DEPLOY KARNE KE BAAD: Neeche BACKEND_URL mein apna Vercel URL dalo
+   Jab tak deploy nahi kiya — manual price use karo (100% accurate)
+   
+   MERGED SYSTEM: SL+Liq Hunt (12pt) + EMA/SSL/RSI (6pt) = 18pt
+   Score 14+/18 = HIGH CONVICTION (est. 85-90%)
+   Score 11-13/18 = MEDIUM (est. 70-80%)  
+   Score 8-10/18 = LOW — small position only
+   Below 8 = NO TRADE
+   
+   WHY MERGE? Both strategies look at same market from different angles:
+   - SL Hunt = WHO is positioned wrong (crowd data)
+   - EMA/SSL/RSI = WHERE is price technically (chart data)
+   When BOTH agree = highest probability trade
+═══════════════════════════════════════════════════════════ */
+
+const MEME = ["DOGE","PEPE","WIF","BONK","SHIB","FLOKI","TRUMP","FARTCOIN","NEIRO","MEME"];
+
+function verdict(s, sA, sB, dir) {
+  // SETUP_FORMING: SL Hunt strong (7+) but Tech weak (0-2) = waiting for trigger
+  const forming = sA >= 7 && sB <= 2 && dir === "NO_TRADE";
+  
+  if (s < 8)  return { tag:"❌ NO TRADE",  c:"#ff1133", bg:"#ff113310", sz:0,  wr:"—", state:"NO_TRADE" };
+  if (forming) return { tag:"⏳ SETUP FORMING", c:"#ff8800", bg:"#ff880010", sz:0, wr:"Wait for trigger", state:"FORMING" };
+  if (s < 11) return { tag:"⚠️ SMALL",     c:"#ff8800", bg:"#ff880010", sz:25, wr:"~65-70%", state:"TRADE" };
+  if (s < 14) return { tag:"🔥 MEDIUM",    c:"#ffcc00", bg:"#ffcc0010", sz:50, wr:"~75-82%", state:"TRADE" };
+  if (s < 16) return { tag:"💰 FULL",      c:"#ff3300", bg:"#ff330010", sz:100,wr:"~85-88%", state:"TRADE" };
+  return           { tag:"💎 MAX",        c:"#00ff88", bg:"#00ff8810", sz:120,wr:"~90%+", state:"TRADE" };
+}
+
+function f$(n){ if(n==null||isNaN(+n)) return "—"; const x=+n; return x>=100?`$${x.toLocaleString(undefined,{maximumFractionDigits:0})}`:x>=1?`$${x.toFixed(2)}`:x>=.0001?`$${x.toFixed(6)}`:`$${x.toFixed(8)}`; }
+function fv(n){ if(n==null||isNaN(+n)) return "—"; return (+n).toLocaleString(undefined,{maximumFractionDigits:2}); }
+
+// ═══ COIN ID MAP for CoinGecko ═══
+const GECKO_IDS = {
+  BTC:"bitcoin",ETH:"ethereum",SOL:"solana",DOGE:"dogecoin",PEPE:"pepe",
+  XRP:"ripple",SUI:"sui",LINK:"chainlink",TRUMP:"official-trump",
+  BONK:"bonk",SHIB:"shiba-inu",WIF:"dogwifcoin",FLOKI:"floki",
+  ADA:"cardano",AVAX:"avalanche-2",NEAR:"near",APT:"aptos",
+  DOT:"polkadot",MATIC:"matic-network",ARB:"arbitrum",OP:"optimism",
+  FARTCOIN:"fartcoin",NEIRO:"neiro",MEME:"meme",BNB:"binancecoin"
+};
+
+// ═══ 🔥 DEPLOY: Yahan apna Vercel backend URL dalo ═══
+// Example: "https://crypto-api-xxxxx.vercel.app"
+// Jab tak deploy nahi kiya, empty rakho — manual price use hoga
+const BACKEND_URL = window.location.origin;
+
+// ═══ BACKEND PRICE FETCH (CORS-free, real-time Binance) ═══
+async function getBackendPrice(coin) {
+  if(!BACKEND_URL) return null;
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/crypto?coin=${coin}`, {signal: AbortSignal.timeout(5000)});
+    if(!r.ok) return null;
+    const d = await r.json();
+    if(!d.success || !d.price?.price) return null;
+    return {
+      price: d.price.price,
+      high24: d.price.high24,
+      low24: d.price.low24,
+      change24: d.price.change24,
+      vol24usd: d.price.volume,
+      funding: d.funding?.rate || null,
+      oi: d.openInterest?.valueUSD || null,
+      lsLong: d.longShortRatio?.longRatio || null,
+      lsShort: d.longShortRatio?.shortRatio || null,
+      source: "BINANCE (real-time)",
+    };
+  } catch { return null; }
+}
+
+// ═══ BINANCE SYMBOL MAP ═══
+const BN_SYM = {
+  BTC:"BTCUSDT",ETH:"ETHUSDT",SOL:"SOLUSDT",DOGE:"DOGEUSDT",PEPE:"PEPEUSDT",
+  XRP:"XRPUSDT",SUI:"SUIUSDT",LINK:"LINKUSDT",TRUMP:"TRUMPUSDT",
+  BONK:"BONKUSDT",SHIB:"SHIBUSDT",WIF:"WIFUSDT",FLOKI:"FLOKIUSDT",
+  ADA:"ADAUSDT",AVAX:"AVAXUSDT",NEAR:"NEARUSDT",APT:"APTUSDT",
+  DOT:"DOTUSDT",MATIC:"MATICUSDT",ARB:"ARBUSDT",OP:"OPUSDT",
+  FARTCOIN:"FARTCOINUSDT",NEIRO:"NEIROUSDT",BNB:"BNBUSDT"
+};
+
+// ═══ BINANCE REAL-TIME via WebSocket ═══
+function getBinancePrice(coin) {
+  return new Promise((resolve) => {
+    const sym = (BN_SYM[coin] || coin+"USDT").toLowerCase();
+    try {
+      const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@ticker`);
+      const timeout = setTimeout(() => { try{ws.close();}catch(e){} resolve(null); }, 3000);
+      ws.onmessage = (e) => {
+        clearTimeout(timeout);
+        try {
+          const d = JSON.parse(e.data);
+          ws.close();
+          resolve({
+            price: parseFloat(d.c),
+            high24: parseFloat(d.h),
+            low24: parseFloat(d.l),
+            change24: parseFloat(d.P),
+            vol24usd: parseFloat(d.q),
+          });
+        } catch { try{ws.close();}catch(e){} resolve(null); }
+      };
+      ws.onerror = () => { clearTimeout(timeout); resolve(null); };
+      ws.onclose = () => {};
+    } catch { resolve(null); }
+  });
+}
+
+// ═══ BINANCE REST — multiple endpoints ═══
+async function getBinanceREST(coin) {
+  const sym = BN_SYM[coin] || coin+"USDT";
+  const urls = [
+    `https://data-api.binance.vision/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api1.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api2.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api3.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+    `https://api4.binance.com/api/v3/ticker/24hr?symbol=${sym}`,
+  ];
+  for(const url of urls) {
+    try {
+      const r = await fetch(url, {signal: AbortSignal.timeout(2500)});
+      if(!r.ok) continue;
+      const d = await r.json();
+      if(d.lastPrice) return {
+        price: parseFloat(d.lastPrice),
+        high24: parseFloat(d.highPrice),
+        low24: parseFloat(d.lowPrice),
+        change24: parseFloat(d.priceChangePercent),
+        vol24usd: parseFloat(d.quoteVolume),
+      };
+    } catch { continue; }
+  }
+  return null;
+}
+
+// ═══ COINCAP.IO — free, no key, CORS-friendly ═══
+async function getCoinCapPrice(coin) {
+  const ids = {BTC:"bitcoin",ETH:"ethereum",SOL:"solana",BNB:"binance-coin",XRP:"xrp",ADA:"cardano",AVAX:"avalanche",DOGE:"dogecoin",MATIC:"polygon",DOT:"polkadot",LINK:"chainlink",SHIB:"shiba-inu",PEPE:"pepe",WIF:"dogwifhat",ARB:"arbitrum"};
+  const id = ids[coin] || coin.toLowerCase();
+  try {
+    const r = await fetch(`https://api.coincap.io/v2/assets/${id}`, {signal: AbortSignal.timeout(3000)});
+    if(!r.ok) return null;
+    const d = await r.json();
+    const a = d.data;
+    if(!a?.priceUsd) return null;
+    return {
+      price: parseFloat(a.priceUsd),
+      change24: parseFloat(a.changePercent24Hr)||0,
+      vol24: parseFloat(a.volumeUsd24Hr)||0,
+      mcap: parseFloat(a.marketCapUsd)||0,
+    };
+  } catch { return null; }
+}
+
+// ═══ COINGECKO SIMPLE (faster, less rate-limited) ═══
+async function getGeckoSimple(coin) {
+  const id = GECKO_IDS[coin] || coin.toLowerCase();
+  try {
+    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true`);
+    if(!r.ok) throw new Error("CG simple fail");
+    const d = await r.json();
+    const p = d[id];
+    if(!p?.usd) return null;
+    return { price: p.usd, change24: p.usd_24h_change||0, vol24: p.usd_24h_vol||0, mcap: p.usd_market_cap||0 };
+  } catch { return null; }
+}
+
+// ═══ COINGECKO FULL (detailed market data) ═══
+async function getGeckoData(coin) {
+  const id = GECKO_IDS[coin] || coin.toLowerCase();
+  try {
+    const r = await fetch(
+      `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`
+    );
+    if (!r.ok) throw new Error("CG fail");
+    const d = await r.json();
+    return {
+      price: d.market_data?.current_price?.usd || 0,
+      high24: d.market_data?.high_24h?.usd || 0,
+      low24: d.market_data?.low_24h?.usd || 0,
+      change24: d.market_data?.price_change_percentage_24h || 0,
+      change7d: d.market_data?.price_change_percentage_7d || 0,
+      change30d: d.market_data?.price_change_percentage_30d || 0,
+      vol24: d.market_data?.total_volume?.usd || 0,
+      mcap: d.market_data?.market_cap?.usd || 0,
+      ath: d.market_data?.ath?.usd || 0,
+      athDrop: d.market_data?.ath_change_percentage?.usd || 0,
+      rank: d.market_cap_rank || 0,
+      name: d.name || coin,
+    };
+  } catch { return null; }
+}
+
+// ═══ COMBINED: 6 sources, freshest price wins ═══
+async function getLiveData(coin) {
+  const [backend, bnWS, bnREST, ccap, cgFull, cgSimple] = await Promise.all([
+    getBackendPrice(coin).catch(()=>null),
+    getBinancePrice(coin).catch(()=>null),
+    getBinanceREST(coin).catch(()=>null),
+    getCoinCapPrice(coin).catch(()=>null),
+    getGeckoData(coin).catch(()=>null),
+    getGeckoSimple(coin).catch(()=>null),
+  ]);
+  
+  // Priority: Backend (real-time) > Binance WS > Binance REST > CoinCap > CoinGecko
+  const sources = [
+    backend?.price > 0 && {d:backend, n:"BINANCE (real-time)", full:false},
+    bnWS?.price > 0 && {d:bnWS, n:"BINANCE WS", full:false},
+    bnREST?.price > 0 && {d:bnREST, n:"BINANCE REST", full:false},
+    ccap?.price > 0 && {d:ccap, n:"CoinCap.io", full:false},
+    cgFull?.price > 0 && {d:cgFull, n:"CoinGecko", full:true},
+    cgSimple?.price > 0 && {d:cgSimple, n:"CoinGecko Simple", full:false},
+  ].filter(Boolean);
+  
+  if(!sources.length) return null;
+  
+  const best = sources[0];
+  const cg = cgFull || {};
+  
+  return {
+    price: best.d.price,
+    high24: best.d.high24 || cg.high24 || best.d.price * 1.02,
+    low24: best.d.low24 || cg.low24 || best.d.price * 0.98,
+    change24: best.d.change24 || cg.change24 || ccap?.change24 || cgSimple?.change24 || 0,
+    change7d: cg.change7d || 0,
+    change30d: cg.change30d || 0,
+    vol24: best.d.vol24usd || best.d.vol24 || cg.vol24 || ccap?.vol24 || cgSimple?.vol24 || 0,
+    mcap: cg.mcap || ccap?.mcap || cgSimple?.mcap || 0,
+    ath: cg.ath || 0,
+    athDrop: cg.athDrop || 0,
+    rank: cg.rank || 0,
+    name: cg.name || coin,
+    source: best.n,
+    note: best.n.includes("BINANCE") ? "" : best.n === "CoinCap.io" ? "" : "⚠️ May be 1-5 min delayed",
+    // Backend bonus data
+    funding: backend?.funding || null,
+    oi: backend?.oi || null,
+    lsLong: backend?.lsLong || null,
+    lsShort: backend?.lsShort || null,
+  };
+}
+
+// ═══ AI CALL (with 60s timeout) ═══
+async function callAI(prompt) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      signal: controller.signal,
+      body: JSON.stringify({
+        model:"claude-sonnet-4-20250514", max_tokens:2500,
+        tools:[{type:"web_search_20250305",name:"web_search"}],
+        messages:[{role:"user",content:prompt}]
+      })
+    });
+    clearTimeout(timeout);
+    const d = await r.json();
+    let t = "";
+    if(d.content) for(const b of d.content) if(b.type==="text") t += b.text;
+    return t;
+  } catch(e) {
+    clearTimeout(timeout);
+    if(e.name === 'AbortError') throw new Error("AI timeout — try again");
+    throw e;
+  }
+}
+
+function parseJSON(t) {
+  try { return JSON.parse(t.trim()); } catch{}
+  const c = t.replace(/```json\s*/gi,"").replace(/```\s*/gi,"").trim();
+  try { return JSON.parse(c); } catch{}
+  const m = c.match(/\{[\s\S]*\}/);
+  if(m) try { return JSON.parse(m[0]); } catch{}
+  return null;
+}
+
+// ═══ FEAR & GREED INDEX — FREE API (alternative.me) ═══
+// ═══ FEAR & GREED INDEX — FREE API ═══
+async function getFearGreed() {
+  try {
+    const r = await fetch("https://api.alternative.me/fng/?limit=1");
+    if(!r.ok) return null;
+    const d = await r.json();
+    return { value: parseInt(d.data?.[0]?.value)||0, label: d.data?.[0]?.value_classification||"" };
+  } catch { return null; }
+}
+
+
+// ═══ AI PROMPT — 3 searches, FIRST = fresh price ═══
+function prompt(coin, cap, live, fear) {
+  const isMeme = MEME.includes(coin);
+  const maxLev = isMeme ? 2 : 3;
+  const risk$ = Math.round(cap * 0.03);
+  const p = live?.price || 0;
+  const f = fear?.value || 0;
+  const isManual = live?.source?.includes("manual");
+
+  const priceInstr = isManual 
+    ? `${coin} CONFIRMED PRICE: $${p} (from Binance, EXACT). Use $${p} for ALL calculations.\n\nSEARCH 2 times:`
+    : `${coin}${p?` (cached ~$${p} — likely STALE)`:""}\n\nSEARCH 3 times:\n1. "${coin} price USD today" — find EXACT current price. Use FRESH price for all calculations.`;
+
+  return `${priceInstr} Fear=${f||"?"}
+${isManual?"1":"2"}. "${coin} funding rate long short ratio open interest liquidation coinglass 2026"
+${isManual?"2":"3"}. "${coin} RSI EMA whale exchange flow support resistance crypto news 2026"
+
+SL HUNT: AGAINST overloaded crowd. Shorts>55%→LONG. Longs>60%→SHORT.
+Extract real numbers. Infer if unavailable (mark "Inferred:"). Score 12 hunt + 6 tech.
+${maxLev}x ISO, 3%risk=$${risk$}. DECISIVE: KYA/KAB/KAHAN/KAB_NIKLON.
+
+JSON ONLY:
+{"coin":"${coin}","price":${p||"<find>"},"price_24h_high":<>,"price_24h_low":<>,"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED","fear_greed":${f||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
+"slHunt":[{"n":"Long/Short Ratio","v":"<max 30ch>","p":<bool>,"d":"<1 line RU>"},{"n":"Open Interest","v":"<>","p":<bool>,"d":"<>"},{"n":"Funding Rate","v":"<>","p":<bool>,"d":"<>"},{"n":"Liq Cluster","v":"<>","p":<bool>,"d":"<>"},{"n":"RSI 4H","v":"<>","p":<bool>,"d":"<>"},{"n":"Whale Activity","v":"<>","p":<bool>,"d":"<>"},{"n":"Divergence","v":"<>","p":<bool>,"d":"<>"},{"n":"Key Level","v":"<>","p":<bool>,"d":"<>"},{"n":"Volume","v":"<>","p":<bool>,"d":"<>"},{"n":"Exchange Flow","v":"<>","p":<bool>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<>","p":<bool>,"d":"<>"},{"n":"Stacked Layers","v":"<>","p":<bool>,"d":"<>"}],
+"emaSSL":[{"n":"EMA 200 Daily","v":"<>","p":<bool>,"d":"<>"},{"n":"ADX 14","v":"<>","p":<bool>,"d":"<>"},{"n":"SSL Channel","v":"<>","p":<bool>,"d":"<>"},{"n":"EMA 20 vs Price","v":"<>","p":<bool>,"d":"<>"},{"n":"RSI vs 50","v":"<>","p":<bool>,"d":"<>"},{"n":"Candle Strength","v":"<>","p":<bool>,"d":"<>"}],
+"trade":{"entry":<price>,"sl":<price>,"sl_why":"<RU>","sl_bad":["<>","<>"],"tp1":{"p":<price>,"close":25},"tp2":{"p":<price>,"close":30},"tp3":{"p":<price>,"close":30},"tp4":{"trail":3,"close":15},"lev":${maxLev},"margin":<$>,"rr":"<1:X>","profit":{"low":<$>,"mid":<$>,"high":<$>},"timeline":"<>"},
+"dip":{"on":<bool>,"dir":"<>","entry":<price>,"sl":<price>,"tp":<price>,"profit":<$>},
+"levels":{"sup":[<prices>],"res":[<prices>]},
+"summary":"<RU: 1.KYA KARUN? 2.KAB? 3.KAHAN ENTRY? 4.KAB NIKLON?>"}`;
+}
+
+// ═══ COMPONENT ═══
+function App() {
+  const [coin, setCoin] = useState("BTC");
+  const [cust, setCust] = useState("");
+  const [cap, setCap] = useState(1000);
+  const [manualPrice, setManualPrice] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [R, setR] = useState(null);
+  const [prog, setProg] = useState(0);
+  const [msg, setMsg] = useState("");
+  const [tab, setTab] = useState(0);
+  const [live, setLive] = useState(null);
+  const retry = useRef(0);
+
+  const sel = coin==="OTHER" ? cust.toUpperCase() : coin;
+
+  const run = useCallback(async () => {
+    if(!sel) return setErr("Coin select karo!");
+    setLoading(true); setErr(null); setR(null); setProg(5); setLive(null);
+    try {
+      // STEP 1: Price + Fear (parallel — fast)
+      setMsg(`📡 ${sel} price + Fear index...`); setProg(10);
+      const mp = parseFloat(manualPrice) || 0;
+      const [liveData, fear] = await Promise.all([
+        getLiveData(sel),
+        getFearGreed(),
+      ]);
+      
+      // Manual price OVERRIDES everything
+      if(mp > 0) {
+        const ld = liveData || {};
+        setLive({...ld, price: mp, source: "BINANCE (manual)", note: "", high24: ld.high24||mp*1.02, low24: ld.low24||mp*0.98, change24: ld.change24||0, change7d: ld.change7d||0, change30d: ld.change30d||0, vol24: ld.vol24||0, mcap: ld.mcap||0, ath: ld.ath||0, athDrop: ld.athDrop||0, rank: ld.rank||0, name: ld.name||sel});
+        setMsg(`✅ ${sel} = $${mp.toLocaleString()} (BINANCE manual) · Fear: ${fear?.value||"?"}`);
+        setProg(25);
+      } else if(liveData?.price > 0) {
+        setLive(liveData);
+        setMsg(`✅ ${sel} = $${liveData.price.toLocaleString()} · Fear: ${fear?.value||"?"}`);
+        setProg(25);
+      } else {
+        setMsg(`⚠️ Price API fail — AI will search`);
+        setProg(15);
+      }
+      
+      // Use manual price for AI prompt
+      const priceForAI = mp > 0 ? {...(liveData||{}), price: mp} : liveData;
+      
+      // STEP 2: AI (2 searches + scoring)
+      setMsg("🔍 Search 1/3: Current price..."); setProg(30);
+      
+      const progTimer = setInterval(() => {
+        setProg(p => {
+          if(p >= 88) return p;
+          const msgs = [
+            [40,"🔍 Search 2/3: Funding, L/S, OI..."],
+            [52,"🔍 Search 3/3: RSI, whale, news..."],
+            [62,"🧮 Scoring 18 checks..."],
+            [72,"📊 Building trade plan..."],
+            [80,"📝 Summary..."],
+            [85,"✅ Almost done..."],
+          ];
+          const next = msgs.find(m => m[0] > p);
+          if(next) { setMsg(next[1]); return next[0]; }
+          return Math.min(p + 0.3, 88);
+        });
+      }, 2500);
+      
+      const raw = await callAI(prompt(sel, cap, priceForAI, fear));
+      clearInterval(progTimer);
+      setProg(90); setMsg("🧮 Parsing...");
+      
+      let data = parseJSON(raw);
+      if(!data && retry.current < 1) {
+        retry.current++;
+        setMsg("🔄 Retry..."); setProg(50);
+        const raw2 = await callAI(prompt(sel, cap, priceForAI, fear));
+        data = parseJSON(raw2);
+      }
+      if(!data) throw new Error("Parse fail — try again");
+
+      // STEP 3: Post-process — Manual price > AI price > CoinGecko
+      const mp2 = parseFloat(manualPrice) || 0;
+      if(mp2 > 0) {
+        // Manual price is KING — override everything
+        data.price = mp2;
+        setLive(prev => prev ? {...prev, price: mp2, source: "BINANCE (manual)"} : {price: mp2, source: "BINANCE (manual)"});
+      } else if(data.price && data.price > 0) {
+        // AI found fresh price from search — use it
+        setLive(prev => prev ? {...prev, price: data.price, source: (prev.source||"") + " → AI fresh"} : {price: data.price, source: "AI Search"});
+      } else if(liveData?.price > 0) {
+        // Fallback to CoinGecko
+        data.price = liveData.price;
+      }
+      // 24h high/low from CoinGecko if AI didn't provide
+      if(!data.price_24h_high && liveData?.high24) data.price_24h_high = liveData.high24;
+      if(!data.price_24h_low && liveData?.low24) data.price_24h_low = liveData.low24;
+      if(fear?.value) {
+        data.fear_greed = fear.value;
+        const fv = fear.value;
+        data.mood = fv<=10?"EXTREME_FEAR":fv<=25?"FEAR":fv<=45?"NEUTRAL":fv<=75?"GREED":"EXTREME_GREED";
+      }
+      
+      const sA = (data.slHunt||[]).filter(x=>x.p).length;
+      const sB = (data.emaSSL||[]).filter(x=>x.p).length;
+      data._sA = sA; data._sB = sB; data._total = sA + sB;
+
+      // Auto-fix huntType
+      if(data.crowd==="SHORT_HEAVY" && sA>=7) data.huntType = "HUNTING_SHORTS";
+      if(data.crowd==="LONG_HEAVY" && sA>=7) data.huntType = "HUNTING_LONGS";
+      
+      // Clean long text
+      if(data.huntZone?.length > 25) {
+        const m = data.huntZone.match(/\$[\d,.]+-?\$?[\d,.]+[Kk]?/);
+        data.huntZone = m ? m[0] : data.huntZone.substring(0,25);
+      }
+      if(data.crowdPct?.length > 20) {
+        const m = data.crowdPct.match(/\d+%?\s*(shorts?|longs?)/i);
+        data.crowdPct = m ? m[0] : data.crowdPct.substring(0,20);
+      }
+      (data.slHunt||[]).forEach(s => { if(s.v?.length > 35) s.v = s.v.substring(0,35); });
+      (data.emaSSL||[]).forEach(s => { if(s.v?.length > 35) s.v = s.v.substring(0,35); });
+      
+      // Setup forming detection
+      if(data._total >= 8 && data.dir === "NO_TRADE") {
+        if(data.huntType === "HUNTING_SHORTS") { data._sugDir = "LONG"; data._sugReason = "Shorts trapped, squeeze forming"; }
+        if(data.huntType === "HUNTING_LONGS") { data._sugDir = "SHORT"; data._sugReason = "Longs trapped, dump forming"; }
+      }
+      
+      setProg(100); setMsg("✅ Done!");
+      setR(data); setTab(0);
+    } catch(e) {
+      setErr(e.message || "Error");
+    } finally {
+      setLoading(false); retry.current = 0;
+    }
+  }, [sel, cap, manualPrice]);
+
+  const V = R ? verdict(R._total||0, R._sA||0, R._sB||0, R?.dir||"NO_TRADE") : null;
+  const dir = R?.dir || "NO_TRADE";
+  const isL = dir==="LONG";
+  const dc = isL?"#00ff88":dir==="SHORT"?"#ff3300":"#605088";
+
+  // ═══ STYLES ═══
+  const bg = "#06040e";
+  const card = "#0d0918";
+  const bdr = "#1a1230";
+
+  return (
+    <div style={{minHeight:"100vh",background:bg,color:"#c0b0e0",fontFamily:"'SF Pro Text','Segoe UI',system-ui,sans-serif"}}>
+      {/* Ambient */}
+      <div style={{position:"fixed",top:0,left:0,right:0,height:400,background:"radial-gradient(ellipse at 50% 0%,rgba(120,60,255,0.04),transparent 65%)",pointerEvents:"none"}}/>
+      
+      <div style={{maxWidth:540,margin:"0 auto",padding:"10px 12px 50px",position:"relative",zIndex:1}}>
+        
+        {/* Header */}
+        <div style={{textAlign:"center",padding:"10px 0 14px"}}>
+          <div style={{display:"inline-block",padding:"3px 12px",borderRadius:16,border:"1px solid rgba(255,51,0,0.35)",background:"rgba(255,51,0,0.06)",fontSize:8,letterSpacing:2,color:"#ff3300",fontWeight:700,textTransform:"uppercase",marginBottom:6}}>
+            COMBINED · SL HUNT + EMA SSL RSI
+          </div>
+          <h1 style={{fontSize:18,fontWeight:800,color:"#f0eaff",letterSpacing:-0.5,margin:"4px 0 2px"}}>
+            Crypto <span style={{color:"#ff3300"}}>Trade</span> Analyzer
+          </h1>
+          <p style={{fontSize:9.5,color:"#605088"}}>18-Point Dual Strategy · AI Real-Time · Exact Entry/Exit/SL</p>
+        </div>
+
+        {/* Input */}
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:12,marginBottom:8}}>
+          <div style={{display:"flex",gap:8}}>
+            <div style={{flex:2}}>
+              <Lbl>COIN</Lbl>
+              <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                {["BTC","ETH","SOL","DOGE","PEPE","XRP","SUI","LINK","TRUMP","OTHER"].map(c=>
+                  <B key={c} on={coin===c} fn={()=>setCoin(c)}>{c}</B>
+                )}
+              </div>
+              {coin==="OTHER" && <input value={cust} onChange={e=>setCust(e.target.value.toUpperCase())} placeholder="NEAR, APT..." style={inp}/>}
+            </div>
+            <div style={{flex:1}}>
+              <Lbl>CAPITAL ($)</Lbl>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                {[500,1000,2000,5000].map(v=>
+                  <B key={v} on={cap===v} fn={()=>setCap(v)} clr="#00ff88">${v>=1000?(v/1000)+"K":v}</B>
+                )}
+                <input type="number" value={cap} onChange={e=>setCap(+e.target.value||0)} style={inp}/>
+              </div>
+            </div>
+          </div>
+          {/* Manual Price Override */}
+          <div style={{marginTop:8}}>
+            <Lbl>📌 BINANCE PRICE (optional — Binance se dekh ke dalo)</Lbl>
+            <input type="number" value={manualPrice} onChange={e=>setManualPrice(e.target.value)} 
+              placeholder={`Binance pe ${sel} ka current price likho...`}
+              style={{...inp,fontSize:13,fontWeight:700,color:"#00ff88",borderColor:manualPrice?"#00ff8850":"#1a1230"}}/>
+            {manualPrice && <div style={{fontSize:8,color:"#00ff88",marginTop:2}}>✅ ${sel} = ${Number(manualPrice).toLocaleString()} (manual) — AI isko use karega</div>}
+          </div>
+          <button onClick={run} disabled={loading} style={{
+            width:"100%",padding:"13px 0",borderRadius:10,border:"none",marginTop:8,
+            background:loading?"#1a1230":"linear-gradient(135deg,#ff3300,#ff5500)",
+            color:loading?"#605088":"#fff",fontSize:13,fontWeight:800,
+            cursor:loading?"wait":"pointer",
+            boxShadow:loading?"none":"0 4px 20px rgba(255,51,0,0.25)",
+            transition:"all .2s"
+          }}>
+            {loading ? "⏳ Analyzing..." : `⚡ ANALYZE ${sel}`}
+          </button>
+        </div>
+
+        {/* Live Price Ticker */}
+        {live && live.price > 0 && (
+          <div style={{background:card,border:`1px solid ${live.change24>=0?"#00ff8830":"#ff113330"}`,borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:"#00ff88",animation:"blink 1.5s infinite"}}/>
+              <div>
+                <div style={{fontSize:8,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>
+                  LIVE · {live.source||"API"} {live.note && <span style={{color:"#ff8800",fontSize:7,textTransform:"none"}}>{live.note}</span>}
+                </div>
+                <div style={{fontSize:16,fontWeight:900,color:"#f0eaff"}}>{live.name} {f$(live.price)}</div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:12,fontWeight:700,color:live.change24>=0?"#00ff88":"#ff1133"}}>{live.change24>=0?"+":""}{live.change24?.toFixed(2)}%</div>
+              <div style={{fontSize:8,color:"#605088"}}>
+                L: {f$(live.low24)} · H: {f$(live.high24)}
+              </div>
+            </div>
+          </div>
+        )}
+        {live && live.price > 0 && (
+          <div style={{display:"flex",gap:3,marginBottom:8}}>
+            {[
+              {l:"7D",v:`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`,c:live.change7d>=0?"#00ff88":"#ff1133"},
+              {l:"30D",v:`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`,c:live.change30d>=0?"#00ff88":"#ff1133"},
+              {l:"VOL",v:`$${(live.vol24/1e9).toFixed(1)}B`,c:"#ffcc00"},
+              {l:"ATH",v:`${live.athDrop?.toFixed(0)}%`,c:"#ff1133"},
+              {l:"RANK",v:`#${live.rank}`,c:"#18ffff"},
+            ].map((x,i)=><div key={i} style={{flex:1,textAlign:"center",padding:"4px 2px",background:card,border:`1px solid ${bdr}`,borderRadius:5}}>
+              <div style={{fontSize:6.5,color:"#605088",textTransform:"uppercase"}}>{x.l}</div>
+              <div style={{fontSize:10,fontWeight:800,color:x.c}}>{x.v}</div>
+            </div>)}
+          </div>
+        )}
+        <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}`}</style>
+
+        {/* Loading */}
+        {loading && (
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{fontSize:10.5,color:"#ff8800",fontWeight:600,marginBottom:5}}>{msg}</div>
+            <div style={{width:"100%",height:5,borderRadius:3,background:"#1a1230",overflow:"hidden"}}>
+              <div style={{width:`${prog}%`,height:"100%",borderRadius:3,background:"linear-gradient(90deg,#ff3300,#ff8800)",transition:"width .4s"}}/>
+            </div>
+          </div>
+        )}
+
+        {err && (
+          <div style={{background:"#ff113310",border:"1px solid #ff113333",borderRadius:10,padding:10,marginBottom:8}}>
+            <span style={{fontSize:11,color:"#ff1133",fontWeight:600}}>❌ {err}</span>
+            <button onClick={run} style={{marginLeft:8,padding:"3px 10px",borderRadius:5,border:"1px solid #ff3300",background:"transparent",color:"#ff3300",fontSize:9,fontWeight:700,cursor:"pointer"}}>Retry</button>
+          </div>
+        )}
+
+        {/* ═══ RESULTS ═══ */}
+        {R && V && (
+          <>
+            {/* Direction + Score Banner */}
+            <div style={{background:V.bg,border:`2px solid ${V.state==="FORMING"?"#ff8800":dc}`,borderRadius:14,padding:"14px 16px",marginBottom:8}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div>
+                  <div style={{fontSize:22,fontWeight:900,color:V.state==="FORMING"?"#ff8800":dc}}>
+                    {V.state==="FORMING"?"⏳":isL?"📈":"📉"} {V.state==="FORMING"?"SETUP FORMING":dir}
+                  </div>
+                  <div style={{fontSize:10,color:"#f0eaff",fontWeight:600}}>{R.coin} @ {f$(R.price)}</div>
+                  <div style={{fontSize:8.5,color:"#605088"}}>24h: {f$(R.price_24h_low)} — {f$(R.price_24h_high)} · {R.mood||""}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:30,fontWeight:900,color:V.c,lineHeight:1}}>{R._total}<span style={{fontSize:13,color:"#403366"}}>/18</span></div>
+                  <div style={{fontSize:9,fontWeight:700,color:V.c}}>{V.tag}</div>
+                  <div style={{fontSize:8,color:"#605088"}}>{V.wr}</div>
+                </div>
+              </div>
+
+              {/* Suggested direction for FORMING state */}
+              {V.state==="FORMING" && R._sugDir && (
+                <div style={{padding:"6px 10px",borderRadius:7,background:R._sugDir==="LONG"?"#00ff8808":"#ff113308",border:`1px solid ${R._sugDir==="LONG"?"#00ff8820":"#ff113320"}`,marginBottom:6}}>
+                  <div style={{fontSize:10,fontWeight:800,color:R._sugDir==="LONG"?"#00ff88":"#ff1133"}}>
+                    💡 DIRECTION: {R._sugDir} — Trigger ka wait
+                  </div>
+                  <div style={{fontSize:9,color:"#9080bb",marginTop:2}}>
+                    SL Hunt: {R._sA}/12 ✅ · Technical: {R._sB}/6 ⏳ — Jab tech flip ho tab entry
+                  </div>
+                </div>
+              )}
+
+              {/* Hunt Info Bar */}
+              {R.huntType && R.huntType !== "NO_HUNT" && (
+                <div style={{display:"flex",gap:4}}>
+                  <div style={{flex:1,padding:"5px 8px",borderRadius:6,background:R.huntType==="HUNTING_LONGS"?"#ff113310":"#00ff8810",border:`1px solid ${R.huntType==="HUNTING_LONGS"?"#ff113330":"#00ff8830"}`}}>
+                    <div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>HUNT TYPE</div>
+                    <div style={{fontSize:10,fontWeight:800,color:R.huntType==="HUNTING_LONGS"?"#ff1133":"#00ff88"}}>{R.huntType==="HUNTING_LONGS"?"🎯 Longs ka SL Hunt":"🎯 Shorts ka SL Hunt"}</div>
+                  </div>
+                  <div style={{flex:1,padding:"5px 8px",borderRadius:6,background:"#ffcc0008",border:"1px solid #ffcc0020"}}>
+                    <div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>CROWD TRAPPED</div>
+                    <div style={{fontSize:10,fontWeight:800,color:"#ffcc00"}}>{R.crowd==="LONG_HEAVY"?"📊 Longs overloaded":"📊 Shorts overloaded"} · {R.crowdPct||""}</div>
+                  </div>
+                </div>
+              )}
+              {R.huntZone && (
+                <div style={{marginTop:4,padding:"4px 8px",borderRadius:5,background:"#ff880008",border:"1px solid #ff880015",fontSize:9,color:"#ff8800"}}>
+                  🎯 Hunt Zone: <b style={{color:"#f0eaff"}}>{R.huntZone}</b>
+                </div>
+              )}
+            </div>
+
+            {/* Score Breakdown Bar */}
+            <div style={{display:"flex",gap:4,marginBottom:4}}>
+              <MiniCard t="SL HUNT" v={`${R._sA}/12`} c={R._sA>=8?"#00ff88":R._sA>=6?"#ffcc00":"#ff1133"}/>
+              <MiniCard t="TECHNICAL" v={`${R._sB}/6`} c={R._sB>=4?"#00ff88":R._sB>=2?"#ffcc00":"#ff1133"}/>
+              <MiniCard t="TOTAL" v={`${R._total}/18`} c={V.c}/>
+              <MiniCard t="FEAR" v={R.fear_greed!=null?`${R.fear_greed}`:"—"} c={R.fear_greed<=25?"#ff1133":R.fear_greed>=75?"#00ff88":"#ffcc00"}/>
+            </div>
+            {/* Readiness Progress */}
+            {V.state==="FORMING" && (
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:7,padding:"6px 10px",marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                  <span style={{fontSize:8,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>TRADE READINESS</span>
+                  <span style={{fontSize:9,fontWeight:700,color:"#ff8800"}}>
+                    SL Hunt ✅ · Technicals ⏳ · Entry ⏳
+                  </span>
+                </div>
+                <div style={{display:"flex",gap:2}}>
+                  {[
+                    {l:"Hunt 7+",done:R._sA>=7},
+                    {l:"ADX>25",done:(R.emaSSL||[]).find(x=>x.n?.includes("ADX"))?.p},
+                    {l:"RSI flip",done:(R.emaSSL||[]).find(x=>x.n?.includes("RSI"))?.p},
+                    {l:"SSL cross",done:(R.emaSSL||[]).find(x=>x.n?.includes("SSL"))?.p},
+                    {l:"EMA20",done:(R.emaSSL||[]).find(x=>x.n?.includes("EMA 20"))?.p},
+                    {l:"Candle",done:(R.emaSSL||[]).find(x=>x.n?.includes("Candle"))?.p},
+                  ].map((s,i)=>(
+                    <div key={i} style={{flex:1,textAlign:"center",padding:"3px 1px",borderRadius:4,background:s.done?"#00ff8815":"#1a1230",border:`1px solid ${s.done?"#00ff8830":"#1a123080"}`}}>
+                      <div style={{fontSize:9,color:s.done?"#00ff88":"#403366"}}>{s.done?"✅":"⏳"}</div>
+                      <div style={{fontSize:6,color:s.done?"#00ff88":"#605088",fontWeight:600}}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div style={{display:"flex",gap:2,marginBottom:8,background:card,borderRadius:9,padding:3,border:`1px solid ${bdr}`}}>
+              {["🎯Hunt","📈Tech","📰News","📋Trade","🛡️Risk"].map((t,i)=>
+                <button key={i} onClick={()=>setTab(i)} style={{
+                  flex:1,padding:"6px 2px",borderRadius:6,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",
+                  background:tab===i?"#ff330018":"transparent",color:tab===i?"#ff3300":"#605088",transition:"all .15s"
+                }}>{t}</button>
+              )}
+            </div>
+
+            {/* ══ TAB 0: SL HUNT + LIQUIDATION HUNT ══ */}
+            {tab===0 && (
+              <div>
+                {/* Hunt Explanation */}
+                {(()=>{
+                  const ht = R.huntType;
+                  const isHuntL = ht==="HUNTING_LONGS";
+                  const isHuntS = ht==="HUNTING_SHORTS";
+                  const hc = isHuntL?"#ff1133":isHuntS?"#00ff88":"#ffcc00";
+                  return (
+                    <>
+                      <div style={{background:`${hc}08`,border:`2px solid ${hc}30`,borderRadius:12,padding:14,marginBottom:8}}>
+                        <div style={{fontSize:10,fontWeight:800,color:hc,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>
+                          {isHuntL?"🎯 LONGS KA SL HUNT → SHORT TRADE":isHuntS?"🎯 SHORTS KA SL HUNT → LONG SQUEEZE":"⏸️ HUNT SETUP FORMING"}
+                        </div>
+                        <div style={{fontSize:11.5,color:"#c0b0e0",lineHeight:1.8}}>
+                          {isHuntL 
+                            ? "Longs overloaded hain → unke SLs NEECHE hain → Whales push karenge neeche → SL trigger → Liq cascade → SHORT se profit lo"
+                            : isHuntS
+                            ? "Shorts overloaded hain → unke SLs UPAR hain → Whales squeeze karenge upar → Short SL trigger → Liquidation squeeze → LONG se profit lo"
+                            : "Crowd mein koi strong imbalance nahi abhi — wait karo jab ek side clearly overloaded ho"}
+                        </div>
+                        {/* Suggested Direction when NO_TRADE but setup exists */}
+                        {R._sugDir && (
+                          <div style={{marginTop:8,padding:"6px 10px",borderRadius:7,background:R._sugDir==="LONG"?"#00ff8810":"#ff113310",border:`1px solid ${R._sugDir==="LONG"?"#00ff8825":"#ff113325"}`}}>
+                            <div style={{fontSize:9,fontWeight:800,color:R._sugDir==="LONG"?"#00ff88":"#ff1133"}}>
+                              💡 SUGGESTED: {R._sugDir} — Jab Trigger Aaye
+                            </div>
+                            <div style={{fontSize:9.5,color:"#9080bb",marginTop:2}}>{R._sugReason}</div>
+                          </div>
+                        )}
+                      </div>
+
+                {/* Crowd Data */}
+                <div style={{display:"flex",gap:5,marginBottom:8}}>
+                  <div style={{flex:1,background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>CROWD</div>
+                    <div style={{fontSize:13,fontWeight:900,color:R.crowd==="LONG_HEAVY"?"#ff1133":R.crowd==="SHORT_HEAVY"?"#00ff88":"#ffcc00"}}>{R.crowd==="LONG_HEAVY"?"📊 Longs Heavy":R.crowd==="SHORT_HEAVY"?"📊 Shorts Heavy":"⚖️ Balanced"}</div>
+                    <div style={{fontSize:9,color:"#9080bb"}}>{R.crowdPct||"—"}</div>
+                  </div>
+                  <div style={{flex:1,background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>HUNT ZONE</div>
+                    <div style={{fontSize:10,fontWeight:800,color:"#ff8800",lineHeight:1.3}}>{typeof R.huntZone==="string" && R.huntZone.length>30 ? R.huntZone.split(",")[0]||R.huntZone.substring(0,30) : R.huntZone||"—"}</div>
+                    <div style={{fontSize:7,color:"#605088"}}>SLs yahan trigger honge</div>
+                  </div>
+                  <div style={{flex:1,background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>HUNT SCORE</div>
+                    <div style={{fontSize:18,fontWeight:900,color:R._sA>=8?"#00ff88":R._sA>=6?"#ffcc00":"#ff1133"}}>{R._sA}/12</div>
+                  </div>
+                </div>
+                    </>
+                  );
+                })()}
+
+                {/* 12 SL Hunt Indicators */}
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                  <Lbl c="#ff3300">📊 12-POINT SL + LIQUIDATION ANALYSIS</Lbl>
+                  {(R.slHunt||[]).map((ind,i)=>(
+                    <Check key={i} pass={ind.p} name={ind.n} val={ind.v} why={ind.d} i={i+1}/>
+                  ))}
+                </div>
+
+                {/* Hunt Chain Visualization */}
+                <div style={{background:"#0d0918",border:"1px solid #ff330020",borderRadius:10,padding:12}}>
+                  <Lbl c="#ff8800">⛓️ CASCADE CHAIN</Lbl>
+                  <div style={{display:"flex",alignItems:"center",gap:0,flexWrap:"wrap"}}>
+                    {(R.huntType==="HUNTING_LONGS" ? [
+                      {e:"📊",t:"Longs Overloaded",c:"#ffcc00"},
+                      {e:"🐋",t:"Whales Push Down",c:"#ff8800"},
+                      {e:"🎯",t:"SL Zone Hit",c:"#ff3300"},
+                      {e:"💥",t:"SL Triggers = Selling",c:"#ff1133"},
+                      {e:"🔥",t:"Liq Zone Hit",c:"#ff0044"},
+                      {e:"💰",t:"CASCADE = Profit!",c:"#00ff88"},
+                    ] : R.huntType==="HUNTING_SHORTS" ? [
+                      {e:"📊",t:"Shorts Overloaded",c:"#ffcc00"},
+                      {e:"🐋",t:"Whales Push Up",c:"#ff8800"},
+                      {e:"🎯",t:"Short SL Zone Hit",c:"#00cc66"},
+                      {e:"💥",t:"Short SL Triggers = Buying",c:"#00ff88"},
+                      {e:"🔥",t:"Short Liq Zone Hit",c:"#00ffaa"},
+                      {e:"💰",t:"SQUEEZE = Profit!",c:"#00ff88"},
+                    ] : [
+                      {e:"⏸️",t:"No Clear Setup",c:"#605088"},
+                      {e:"⏳",t:"Wait for Imbalance",c:"#605088"},
+                    ]).map((s,i,arr)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center"}}>
+                        <div style={{textAlign:"center",padding:"4px 6px"}}>
+                          <div style={{fontSize:14}}>{s.e}</div>
+                          <div style={{fontSize:7.5,fontWeight:700,color:s.c,maxWidth:65,lineHeight:1.2}}>{s.t}</div>
+                        </div>
+                        {i<arr.length-1 && <div style={{fontSize:10,color:"#403366"}}>→</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══ TAB 1: TECHNICAL INDICATORS (EMA + SSL + RSI) ══ */}
+            {tab===1 && (
+              <div>
+                {/* Score Header */}
+                <div style={{display:"flex",gap:5,marginBottom:8}}>
+                  <div style={{flex:1,background:"#18ffff06",border:"1px solid #18ffff20",borderRadius:10,padding:"10px",textAlign:"center"}}>
+                    <div style={{fontSize:8,color:"#605088",textTransform:"uppercase"}}>EMA + SSL + RSI</div>
+                    <div style={{fontSize:24,fontWeight:900,color:"#18ffff"}}>{R._sB}/6</div>
+                    <div style={{fontSize:9,color:R._sB>=5?"#00ff88":R._sB>=4?"#ffcc00":R._sB>=2?"#ff8800":"#ff1133",fontWeight:600}}>
+                      {R._sB>=5?"✅ STRONG":R._sB>=4?"⚠️ MODERATE":R._sB>=2?"⚠️ WEAK":"❌ NO SIGNAL"}
+                    </div>
+                  </div>
+                  <div style={{flex:1,background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:"10px",textAlign:"center"}}>
+                    <div style={{fontSize:8,color:"#605088",textTransform:"uppercase"}}>WHAT THIS MEANS</div>
+                    <div style={{fontSize:9,color:"#c0b0e0",marginTop:4,lineHeight:1.5}}>
+                      {R._sB>=4 
+                        ? "Technicals confirm direction ✅"
+                        : R._sA>=7 && R._sB<=2 
+                        ? "SL Hunt strong lekin trigger nahi aya ⏳" 
+                        : "Weak setup — caution ⚠️"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Explanation when low tech score but high hunt score */}
+                {R._sA >= 7 && R._sB <= 2 && (
+                  <div style={{background:"#ffcc0006",border:"1px solid #ffcc0020",borderRadius:10,padding:12,marginBottom:8}}>
+                    <Lbl c="#ffcc00">💡 KYUN TECHNICAL SCORE LOW HAI?</Lbl>
+                    <div style={{fontSize:10.5,color:"#c0b0e0",lineHeight:1.8}}>
+                      {R.huntType==="HUNTING_SHORTS" 
+                        ? "SL Hunt LONG bol raha (shorts trapped) lekin chart abhi BEARISH hai. Yeh NORMAL hai counter-trend trade mein! Technicals tab flip honge jab bounce START hoga. Jab RSI > 50, SSL green cross, price > EMA 20 ho — tab DONO strategies agree karenge aur score 14+ hoga. WAIT for technical flip!"
+                        : R.huntType==="HUNTING_LONGS"
+                        ? "SL Hunt SHORT bol raha (longs trapped) lekin chart abhi BULLISH hai. Jab reversal candle aaye aur RSI < 50 ho tab technicals bhi align honge."
+                        : "Indicators abhi direction confirm nahi kar rahe. Wait karo clear signal ka."}
+                    </div>
+                  </div>
+                )}
+
+                {/* 6 Technical Checks */}
+                <div style={{background:card,border:"1px solid #18ffff15",borderRadius:10,padding:12,marginBottom:8}}>
+                  <Lbl c="#18ffff">📈 6-POINT TECHNICAL CHECKLIST</Lbl>
+                  {(R.emaSSL||[]).map((ind,i)=>(
+                    <Check key={i} pass={ind.p} name={ind.n} val={ind.v} why={ind.d} i={i+1}/>
+                  ))}
+                </div>
+
+                {/* Strategy Agreement */}
+                <div style={{background:R._sA>=6&&R._sB>=4?"#00ff8808":card,border:`2px solid ${R._sA>=6&&R._sB>=4?"#00ff8830":bdr}`,borderRadius:10,padding:12,textAlign:"center"}}>
+                  <Lbl c="#aa66ff">⚔️ STRATEGY CONFLUENCE</Lbl>
+                  <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:6}}>
+                    <div><div style={{fontSize:8,color:"#605088"}}>SL HUNT</div><div style={{fontSize:16,fontWeight:900,color:"#ff3300"}}>{R._sA}/12</div></div>
+                    <div style={{fontSize:18,color:"#403366",alignSelf:"center"}}>+</div>
+                    <div><div style={{fontSize:8,color:"#605088"}}>TECHNICAL</div><div style={{fontSize:16,fontWeight:900,color:"#18ffff"}}>{R._sB}/6</div></div>
+                    <div style={{fontSize:18,color:"#403366",alignSelf:"center"}}>=</div>
+                    <div><div style={{fontSize:8,color:"#605088"}}>TOTAL</div><div style={{fontSize:16,fontWeight:900,color:V.c}}>{R._total}/18</div></div>
+                  </div>
+                  <div style={{fontSize:10,color:R._sA>=6&&R._sB>=4?"#00ff88":"#ffcc00",fontWeight:600}}>
+                    {R._sA>=6&&R._sB>=4?"✅ Dono strategies AGREE — HIGH probability!":"⚠️ Strategies fully align nahi ho rahi — cautious raho"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══ TAB 2: NEWS + MARKET MOOD ══ */}
+            {tab===2 && (
+              <div>
+                {/* Fear & Greed */}
+                <div style={{background:card,border:`1px solid ${R.fear_greed<=25?"#ff113330":R.fear_greed>=75?"#00ff8830":"#ffcc0030"}`,borderRadius:12,padding:14,marginBottom:8}}>
+                  <Lbl c="#ff8800">😱 FEAR & GREED INDEX</Lbl>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{fontSize:36,fontWeight:900,color:R.fear_greed<=25?"#ff1133":R.fear_greed<=45?"#ff8800":R.fear_greed<=55?"#ffcc00":"#00ff88",lineHeight:1}}>
+                      {R.fear_greed ?? "—"}
+                    </div>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:R.fear_greed<=25?"#ff1133":"#ffcc00"}}>{R.mood?.replace(/_/g," ")||"—"}</div>
+                      <div style={{fontSize:9,color:"#605088"}}>0 = Extreme Fear · 100 = Extreme Greed</div>
+                    </div>
+                  </div>
+                  <div style={{width:"100%",height:8,borderRadius:4,background:"linear-gradient(90deg,#ff1133,#ff8800,#ffcc00,#00ff88)",marginTop:8,position:"relative"}}>
+                    <div style={{position:"absolute",left:`${R.fear_greed||0}%`,top:-3,width:14,height:14,borderRadius:"50%",background:"#fff",border:"3px solid #06040e",transform:"translateX(-50%)",boxShadow:"0 0 8px rgba(255,255,255,0.3)"}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+                    <span style={{fontSize:7,color:"#ff1133"}}>EXTREME FEAR</span>
+                    <span style={{fontSize:7,color:"#00ff88"}}>EXTREME GREED</span>
+                  </div>
+                  {R.fear_greed<=20 && (
+                    <div style={{marginTop:8,padding:"6px 8px",borderRadius:6,background:"#ff113308",border:"1px solid #ff113315",fontSize:9.5,color:"#ff8800",lineHeight:1.6}}>
+                      💡 <b>SL Hunt Signal:</b> Extreme fear = crowd BEARISH/SHORT heavy → Shorts ka SL upar hai → Squeeze setup possible
+                    </div>
+                  )}
+                  {R.fear_greed>=80 && (
+                    <div style={{marginTop:8,padding:"6px 8px",borderRadius:6,background:"#00ff8808",border:"1px solid #00ff8815",fontSize:9.5,color:"#ff8800",lineHeight:1.6}}>
+                      💡 <b>SL Hunt Signal:</b> Extreme greed = crowd BULLISH/LONG heavy → Longs ka SL neeche hai → Dump setup possible
+                    </div>
+                  )}
+                </div>
+
+                {/* NEWS */}
+                {R.news && R.news.headline && (
+                  <div style={{background:R.news.impact==="BEARISH"?"#ff113308":R.news.impact==="BULLISH"?"#00ff8808":"#ffcc0008",border:`2px solid ${R.news.impact==="BEARISH"?"#ff113330":R.news.impact==="BULLISH"?"#00ff8830":"#ffcc0030"}`,borderRadius:12,padding:14,marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                      <span style={{fontSize:16}}>📰</span>
+                      <Lbl c={R.news.impact==="BEARISH"?"#ff1133":R.news.impact==="BULLISH"?"#00ff88":"#ffcc00"}>
+                        NEWS IMPACT — {R.news.impact}
+                      </Lbl>
+                    </div>
+                    <div style={{fontSize:12,color:"#f0eaff",fontWeight:600,lineHeight:1.8,marginBottom:6}}>{R.news.headline}</div>
+                    {R.news.factor && (
+                      <div style={{padding:"6px 8px",borderRadius:6,background:"#0d0918",border:`1px solid ${bdr}`,fontSize:10,color:"#9080bb",lineHeight:1.6}}>
+                        📌 <b style={{color:"#ff8800"}}>Impact:</b> {R.news.factor}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Market Stats from CoinGecko */}
+                {live && (
+                  <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                    <Lbl c="#18ffff">📊 MARKET DATA (LIVE)</Lbl>
+                    {[
+                      {l:"24h Volume",v:`$${(live.vol24/1e9).toFixed(2)}B`,c:"#f0eaff"},
+                      {l:"Market Cap",v:`$${(live.mcap/1e9).toFixed(1)}B`,c:"#f0eaff"},
+                      {l:"Rank",v:`#${live.rank}`,c:"#18ffff"},
+                      {l:"24h Change",v:`${live.change24>=0?"+":""}${live.change24?.toFixed(2)}%`,c:live.change24>=0?"#00ff88":"#ff1133"},
+                      {l:"7d Change",v:`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`,c:live.change7d>=0?"#00ff88":"#ff1133"},
+                      {l:"30d Change",v:`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`,c:live.change30d>=0?"#00ff88":"#ff1133"},
+                      {l:"ATH",v:f$(live.ath),c:"#ffcc00"},
+                      {l:"Drop from ATH",v:`${live.athDrop?.toFixed(1)}%`,c:"#ff1133"},
+                    ].map((r,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:i<7?`1px solid ${bdr}`:"none"}}>
+                        <span style={{fontSize:10,color:"#605088"}}>{r.l}</span>
+                        <span style={{fontSize:10.5,color:r.c,fontWeight:700}}>{r.v}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Key Levels */}
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12}}>
+                  <Lbl c="#0099ff">🔑 KEY LEVELS</Lbl>
+                  {R.levels?.sup?.length>0 && <div style={{fontSize:10.5,color:"#9080bb",marginBottom:4}}><b style={{color:"#00ff88"}}>Supports:</b> {R.levels.sup.map(s=>f$(s)).join(" · ")}</div>}
+                  {R.levels?.res?.length>0 && <div style={{fontSize:10.5,color:"#9080bb"}}><b style={{color:"#ff1133"}}>Resistances:</b> {R.levels.res.map(s=>f$(s)).join(" · ")}</div>}
+                </div>
+              </div>
+            )}
+
+            {/* ══ TAB 3: TRADE PLAN ══ */}
+            {tab===3 && (
+              <div>
+                {R._total < 8 ? (
+                  <div>
+                    <div style={{textAlign:"center",padding:14,marginBottom:8}}>
+                      <div style={{fontSize:36}}>🚫</div>
+                      <div style={{fontSize:16,fontWeight:900,color:"#ff1133",marginTop:4}}>NO TRADE — {R._total}/18</div>
+                      <div style={{fontSize:10,color:"#605088",marginTop:3}}>Score 8+ chahiye. Abhi setup nahi bana.</div>
+                    </div>
+
+                    {/* Why */}
+                    <div style={{background:"#ff113306",border:"1px solid #ff113320",borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#ff1133">❌ KYUN NO TRADE?</Lbl>
+                      <p style={{fontSize:11,color:"#c0b0e0",lineHeight:1.8,margin:0}}>{R.why}</p>
+                    </div>
+
+                    {/* What to watch */}
+                    <div style={{background:"#ffcc0006",border:"1px solid #ffcc0020",borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#ffcc00">👀 KAB ENTRY POSSIBLE HOGI?</Lbl>
+                      <div style={{fontSize:10.5,color:"#c0b0e0",lineHeight:1.8}}>
+                        {R.huntType==="HUNTING_SHORTS" ? (
+                          <>• RSI 30 ke upar cross kare (bounce confirmation)<br/>
+                          • Hammer/Doji candle 4H pe (buyers returning)<br/>
+                          • Volume spike phir decline (sellers exhausted)<br/>
+                          • Price same support pe 2-3 baar hold kare<br/>
+                          <b style={{color:"#00ff88"}}>→ Tab re-analyze karo — LONG signal expected</b></>
+                        ) : R.huntType==="HUNTING_LONGS" ? (
+                          <>• RSI 70 ke neeche aaye (momentum fading)<br/>
+                          • Bearish engulfing candle at resistance<br/>
+                          • Volume declining on rallies<br/>
+                          <b style={{color:"#ff1133"}}>→ Tab re-analyze karo — SHORT signal expected</b></>
+                        ) : (
+                          <>• Koi clear crowd imbalance develop ho (60%+ one side)<br/>
+                          • Fear/Greed extreme levels pe jaaye<br/>
+                          • Strong trigger candle dikhe<br/>
+                          <b style={{color:"#ffcc00"}}>→ 2-4 hours baad re-analyze karo</b></>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Prepared plan if AI gave one */}
+                    {R.trade && R.trade.entry && (
+                      <div style={{background:"#ffffff04",border:"1px dashed #ff880030",borderRadius:10,padding:12,marginBottom:8}}>
+                        <Lbl c="#ff8800">📋 PREPARED PLAN — Jab Score 8+ Ho</Lbl>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:6}}>
+                          <Stat l={R._sugDir||"DIR"} v={R._sugDir||"—"} c={R._sugDir==="LONG"?"#00ff88":"#ff1133"}/>
+                          <Stat l="ENTRY" v={f$(R.trade.entry)} c="#ffcc00"/>
+                          <Stat l="SL" v={f$(R.trade.sl)} c="#ff1133"/>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                          <Stat l="TP1" v={R.trade.tp1?f$(R.trade.tp1.p):"—"} c="#00ff88"/>
+                          <Stat l="TP2" v={R.trade.tp2?f$(R.trade.tp2.p):"—"} c="#00ff88"/>
+                          <Stat l="TP3" v={R.trade.tp3?f$(R.trade.tp3.p):"—"} c="#00ff88"/>
+                        </div>
+                        <div style={{marginTop:6,fontSize:8.5,color:"#605088",textAlign:"center"}}>⚠️ Yeh plan SIRF tab use karo jab trigger confirm ho aur score 8+ aaye</div>
+                      </div>
+                    )}
+
+                    {/* Summary */}
+                    {R.summary && (
+                      <div style={{background:"#0d0918",border:`1px solid ${bdr}`,borderRadius:10,padding:12}}>
+                        <Lbl c="#ffcc00">🤖 FULL ANALYSIS</Lbl>
+                        <p style={{fontSize:11,color:"#c0b0e0",lineHeight:1.9,margin:0,whiteSpace:"pre-line"}}>{R.summary}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : dir === "NO_TRADE" ? (
+                  <>
+                    {/* Score is 8+ but AI says wait — show WATCHLIST mode */}
+                    <div style={{background:"#ff880008",border:"2px solid #ff880030",borderRadius:12,padding:14,marginBottom:8,textAlign:"center"}}>
+                      <div style={{fontSize:28}}>⏳</div>
+                      <div style={{fontSize:16,fontWeight:900,color:"#ff8800",marginTop:4}}>SETUP FORMING — WAIT</div>
+                      <div style={{fontSize:10,color:"#ffcc00",marginTop:3}}>
+                        SL Hunt: <b>{R._sA}/12</b> ✅ · Technical: <b>{R._sB}/6</b> ⏳
+                      </div>
+                      <div style={{fontSize:9,color:"#605088",marginTop:2}}>
+                        {R._sugDir ? `Direction: ${R._sugDir} — jab technicals flip hon tab entry` : "Trigger ka wait karo"}
+                      </div>
+                    </div>
+                    
+                    {/* Why waiting */}
+                    <div style={{background:"#ffcc0006",border:"1px solid #ffcc0020",borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#ffcc00">⏳ KYUN WAIT?</Lbl>
+                      <p style={{fontSize:11.5,color:"#c0b0e0",lineHeight:1.8,margin:0}}>{R.why}</p>
+                    </div>
+
+                    {/* NEWS Impact */}
+                    {R.news && R.news.headline && (
+                      <div style={{background:R.news.impact==="BEARISH"?"#ff113308":R.news.impact==="BULLISH"?"#00ff8808":"#ffcc0008",border:`1px solid ${R.news.impact==="BEARISH"?"#ff113325":R.news.impact==="BULLISH"?"#00ff8825":"#ffcc0025"}`,borderRadius:10,padding:12,marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                          <span style={{fontSize:13}}>📰</span>
+                          <Lbl c={R.news.impact==="BEARISH"?"#ff1133":R.news.impact==="BULLISH"?"#00ff88":"#ffcc00"}>NEWS — {R.news.impact}</Lbl>
+                        </div>
+                        <div style={{fontSize:11,color:"#f0eaff",fontWeight:600,lineHeight:1.7,marginBottom:4}}>{R.news.headline}</div>
+                        {R.news.factor && <div style={{fontSize:10,color:"#9080bb",lineHeight:1.5}}>📌 {R.news.factor}</div>}
+                      </div>
+                    )}
+
+                    {/* What to watch for */}
+                    <div style={{background:"#00ff8808",border:"1px solid #00ff8820",borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#00ff88">👀 ENTRY TRIGGER — YEH DEKHO</Lbl>
+                      <div style={{fontSize:10.5,color:"#c0b0e0",lineHeight:2}}>
+                        {R.huntType==="HUNTING_SHORTS" ? (
+                          <>
+                            ✅ Hammer candle on 4H (long lower wick + green close)<br/>
+                            ✅ RSI crossing ABOVE 30 (bounce starting)<br/>
+                            ✅ Volume spike then DROP (sellers exhausted)<br/>
+                            ✅ Funding rate most negative then stabilizing<br/>
+                            ✅ Price holding same support 2-3 times (double bottom)<br/>
+                            <b style={{color:"#00ff88"}}>→ Tab LONG entry milegi (Short Squeeze)</b>
+                          </>
+                        ) : R.huntType==="HUNTING_LONGS" ? (
+                          <>
+                            ✅ Bearish engulfing candle at resistance<br/>
+                            ✅ RSI dropping below 70 (momentum fading)<br/>
+                            ✅ Volume declining on pushes up<br/>
+                            ✅ Funding rate extremely positive then flattening<br/>
+                            ✅ Rejection wick at key resistance<br/>
+                            <b style={{color:"#ff1133"}}>→ Tab SHORT entry milegi (Long SL Hunt)</b>
+                          </>
+                        ) : (
+                          <>
+                            ✅ Clear crowd imbalance develop ho (60%+ one side)<br/>
+                            ✅ Funding rate extreme positive ya negative<br/>
+                            ✅ Strong trigger candle (engulfing/hammer)<br/>
+                            <b style={{color:"#ffcc00"}}>→ Tab direction clear hoga</b>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Show trade plan if AI provided one despite NO_TRADE */}
+                    {R.trade && R.trade.entry && (
+                      <div style={{background:"#ffffff04",border:"1px dashed #ffcc0030",borderRadius:10,padding:12,marginBottom:8}}>
+                        <Lbl c="#ff8800">📋 PREPARED TRADE PLAN — Jab Trigger Aaye</Lbl>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:8}}>
+                          <Stat l="ENTRY" v={f$(R.trade.entry)} c="#ffcc00"/>
+                          <Stat l="STOP LOSS" v={f$(R.trade.sl)} c="#ff1133"/>
+                          <Stat l="LEVERAGE" v={`${R.trade.lev}x`} c="#ff8800"/>
+                        </div>
+                        <div style={{fontSize:9,color:"#605088",textAlign:"center"}}>⚠️ Yeh plan tab USE karo jab trigger candle confirm ho</div>
+                      </div>
+                    )}
+
+                    {R.summary && (
+                      <div style={{background:"#ffcc0006",border:"1px solid #ffcc0015",borderRadius:10,padding:12}}>
+                        <Lbl c="#ffcc00">🤖 FULL ANALYSIS</Lbl>
+                        <p style={{fontSize:11,color:"#c0b0e0",lineHeight:1.9,margin:0,whiteSpace:"pre-line"}}>{R.summary}</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Why this direction */}
+                    <div style={{background:`${dc}08`,border:`1px solid ${dc}25`,borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c={dc}>{isL?"📈 KYUN LONG?":"📉 KYUN SHORT?"}</Lbl>
+                      <p style={{fontSize:11.5,color:"#c0b0e0",lineHeight:1.8,margin:0}}>{R.why}</p>
+                    </div>
+
+                    {/* NEWS Impact */}
+                    {R.news && R.news.headline && (
+                      <div style={{background:R.news.impact==="BEARISH"?"#ff113308":R.news.impact==="BULLISH"?"#00ff8808":"#ffcc0008",border:`1px solid ${R.news.impact==="BEARISH"?"#ff113325":R.news.impact==="BULLISH"?"#00ff8825":"#ffcc0025"}`,borderRadius:10,padding:12,marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                          <span style={{fontSize:13}}>📰</span>
+                          <Lbl c={R.news.impact==="BEARISH"?"#ff1133":R.news.impact==="BULLISH"?"#00ff88":"#ffcc00"}>NEWS — {R.news.impact}</Lbl>
+                        </div>
+                        <div style={{fontSize:11,color:"#f0eaff",fontWeight:600,lineHeight:1.7,marginBottom:4}}>{R.news.headline}</div>
+                        {R.news.factor && <div style={{fontSize:10,color:"#9080bb",lineHeight:1.5}}>📌 {R.news.factor}</div>}
+                      </div>
+                    )}
+
+                    {/* Main Numbers */}
+                    {R.trade && (
+                      <>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:8}}>
+                          <Stat l="ENTRY" v={f$(R.trade.entry)} c="#f0eaff"/>
+                          <Stat l="STOP LOSS" v={f$(R.trade.sl)} c="#ff1133"/>
+                          <Stat l="LEVERAGE" v={`${R.trade.lev}x`} c="#ff8800"/>
+                        </div>
+
+                        {/* TPs */}
+                        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                          <Lbl c="#00ff88">TAKE PROFIT</Lbl>
+                          {[R.trade.tp1,R.trade.tp2,R.trade.tp3,R.trade.tp4].map((tp,i)=>tp&&(
+                            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:i<3?`1px solid ${bdr}`:"none"}}>
+                              <span style={{fontSize:10.5,fontWeight:700,color:"#00ff88"}}>TP{i+1}</span>
+                              <span style={{fontSize:11,color:"#f0eaff",fontWeight:600}}>{tp.p?f$(tp.p):`Trail ${tp.trail}%`}</span>
+                              <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"#00ff8810",color:"#00ff88",fontWeight:600}}>{tp.close}%</span>
+                            </div>
+                          ))}
+                          <div style={{marginTop:6,fontSize:9.5,color:"#ff8800"}}>⚡ TP1 hit → SL ko breakeven pe move karo!</div>
+                        </div>
+
+                        {/* R:R + Profit */}
+                        <div style={{display:"flex",gap:5,marginBottom:8}}>
+                          <Stat l="R:R" v={R.trade.rr||"—"} c="#ffcc00"/>
+                          <Stat l="TIMELINE" v={R.trade.timeline||"—"} c="#18ffff"/>
+                        </div>
+
+                        {R.trade.profit && (
+                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                            <Lbl c="#ffcc00">EXPECTED PROFIT</Lbl>
+                            {[
+                              {l:"Conservative",v:`$${fv(R.trade.profit.low)}`,c:"#9080bb"},
+                              {l:"Target",v:`$${fv(R.trade.profit.mid)}`,c:"#ffcc00"},
+                              {l:"Maximum",v:`$${fv(R.trade.profit.high)}`,c:"#00ff88"},
+                            ].map((r,i)=>(
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:i<2?`1px solid ${bdr}`:"none"}}>
+                                <span style={{fontSize:10,color:"#605088"}}>{r.l}</span>
+                                <span style={{fontSize:11,color:r.c,fontWeight:700}}>{r.v}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Double Dip */}
+                        {R.dip?.on && (
+                          <div style={{background:"#00ff8808",border:"1px solid #00ff8825",borderRadius:10,padding:12,marginBottom:8}}>
+                            <Lbl c="#00ff88">🔄 DOUBLE DIP — {R.dip.dir} After Main</Lbl>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                              <Stat l="Entry" v={f$(R.dip.entry)} c="#00ff88"/>
+                              <Stat l="SL" v={f$(R.dip.sl)} c="#ff1133"/>
+                              <Stat l="TP" v={f$(R.dip.tp)} c="#00ff88"/>
+                            </div>
+                            <div style={{marginTop:4,fontSize:10,color:"#00ff88",textAlign:"center",fontWeight:600}}>Est. Profit: ~${fv(R.dip.profit)}</div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Summary */}
+                    {R.summary && (
+                      <div style={{background:"#ffcc0006",border:`1px solid #ffcc0020`,borderRadius:10,padding:12,marginBottom:8}}>
+                        <Lbl c="#ffcc00">🤖 AI SUMMARY</Lbl>
+                        <p style={{fontSize:11,color:"#c0b0e0",lineHeight:1.9,margin:0,whiteSpace:"pre-line"}}>{R.summary}</p>
+                      </div>
+                    )}
+
+                    {/* 3-Phase Entry */}
+                    <div style={{background:card,border:`1px solid #18ffff20`,borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#18ffff">🔐 3-PHASE ENTRY</Lbl>
+                      {[
+                        {n:"Phase 1: SCORE",d:`Combined ${R._total}/18 ${R._total>=8?"✅":"❌"}`,done:R._total>=8,c:"#00ff88"},
+                        {n:"Phase 2: TRIGGER",d:isL?"Hammer / Bullish Engulfing + SSL Green cross ka wait":"Bearish Engulfing / Shooting Star + SSL Red cross",done:false,c:"#ffcc00"},
+                        {n:"Phase 3: CONFIRM",d:isL?"Next 4H candle GREEN close + RSI > 50":"Next 4H candle RED close + RSI < 50",done:false,c:"#ff8800"},
+                      ].map((p,i)=>(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",background:p.done?"#00ff8806":"#1a123050",border:`1px solid ${p.done?"#00ff8820":bdr}`,borderRadius:7,marginBottom:3}}>
+                          <div style={{width:18,height:18,borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",background:p.done?"#00ff88":"#1a1230",color:p.done?"#000":"#605088",fontSize:8,fontWeight:800,flexShrink:0}}>{p.done?"✓":i+1}</div>
+                          <div>
+                            <div style={{fontSize:9.5,fontWeight:700,color:p.c}}>{p.n}</div>
+                            <div style={{fontSize:8.5,color:"#9080bb"}}>{p.d}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Price Map */}
+                    {R.trade && (
+                      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12}}>
+                        <Lbl c="#ffcc00">🗺️ PRICE MAP</Lbl>
+                        {(()=>{
+                          const pts = [];
+                          if(isL) {
+                            if(R.trade.sl) pts.push({l:"🔴 SL",p:R.trade.sl,c:"#ff1133"});
+                            if(R.trade.entry) pts.push({l:"🟡 ENTRY",p:R.trade.entry,c:"#ffcc00"});
+                            if(R.trade.tp1?.p) pts.push({l:"🟢 TP1",p:R.trade.tp1.p,c:"#66ff99"});
+                            if(R.trade.tp2?.p) pts.push({l:"🟢 TP2",p:R.trade.tp2.p,c:"#33ff77"});
+                            if(R.trade.tp3?.p) pts.push({l:"🟢 TP3",p:R.trade.tp3.p,c:"#00ff88"});
+                            pts.sort((a,b)=>a.p-b.p);
+                          } else {
+                            if(R.trade.tp3?.p) pts.push({l:"🟢 TP3",p:R.trade.tp3.p,c:"#00ff88"});
+                            if(R.trade.tp2?.p) pts.push({l:"🟢 TP2",p:R.trade.tp2.p,c:"#33ff77"});
+                            if(R.trade.tp1?.p) pts.push({l:"🟢 TP1",p:R.trade.tp1.p,c:"#66ff99"});
+                            if(R.trade.entry) pts.push({l:"🟡 ENTRY",p:R.trade.entry,c:"#ffcc00"});
+                            if(R.trade.sl) pts.push({l:"🔴 SL",p:R.trade.sl,c:"#ff1133"});
+                            pts.sort((a,b)=>b.p-a.p);
+                          }
+                          return pts.map((lv,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderBottom:`1px solid ${bdr}`}}>
+                              <div style={{width:5,height:5,borderRadius:"50%",background:lv.c}}/>
+                              <span style={{fontSize:9.5,color:lv.c,fontWeight:700,minWidth:55}}>{lv.l}</span>
+                              <div style={{flex:1,height:1,background:`${lv.c}22`}}/>
+                              <span style={{fontSize:11,color:"#f0eaff",fontWeight:700}}>{f$(lv.p)}</span>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ══ TAB 4: RISK ══ */}
+            {tab===4 && (
+              <div>
+                {R._total<8||!R.trade ? <NoTrade s={R._total}/> : (
+                  <>
+                    {/* SL Card */}
+                    <div style={{background:"#ff113308",border:"2px solid #ff113333",borderRadius:12,padding:14,marginBottom:8}}>
+                      <Lbl c="#ff1133">🛡️ STOP LOSS — WHALE PROOF</Lbl>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                        <Stat l="SL PRICE" v={f$(R.trade.sl)} c="#ff1133"/>
+                        <Stat l="$ AT RISK" v={`$${Math.round(cap*0.03)}`} c="#ff8800"/>
+                      </div>
+                      {R.trade.sl_why && (
+                        <div style={{padding:"7px 9px",borderRadius:7,background:"#00ff8806",border:"1px solid #00ff8815",marginBottom:6}}>
+                          <div style={{fontSize:9,fontWeight:700,color:"#00ff88",marginBottom:2}}>🐋 WHALE-PROOF KYUN:</div>
+                          <div style={{fontSize:10.5,color:"#b8a8d8",lineHeight:1.6}}>{R.trade.sl_why}</div>
+                        </div>
+                      )}
+                      {R.trade.sl_bad?.length>0 && (
+                        <div style={{padding:"7px 9px",borderRadius:7,background:"#ff113306",border:"1px solid #ff113315"}}>
+                          <div style={{fontSize:9,fontWeight:700,color:"#ff1133",marginBottom:2}}>❌ YAHAN SL MAT LAGAO:</div>
+                          {R.trade.sl_bad.map((b,i)=><div key={i} style={{fontSize:10,color:"#ff5544",lineHeight:1.5}}>• {b}</div>)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Position Sizing */}
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                      <Lbl c="#18ffff">📐 POSITION</Lbl>
+                      {[
+                        {l:"Capital",v:`$${cap.toLocaleString()}`,c:"#f0eaff"},
+                        {l:"Risk (3%)",v:`$${Math.round(cap*0.03)}`,c:"#ff1133"},
+                        {l:"Score Size",v:`${V.sz}% of max`,c:"#ff8800"},
+                        {l:"Margin",v:`$${fv(R.trade.margin)}`,c:"#f0eaff"},
+                        {l:`Notional (${R.trade.lev}x)`,v:`$${fv((R.trade.margin||0)*R.trade.lev)}`,c:"#ffcc00"},
+                      ].map((r,i)=>(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:i<4?`1px solid ${bdr}`:"none"}}>
+                          <span style={{fontSize:10,color:"#605088"}}>{r.l}</span>
+                          <span style={{fontSize:10.5,color:r.c,fontWeight:700}}>{r.v}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Rules */}
+                    <div style={{background:"#ff113306",border:"1px solid #ff113315",borderRadius:10,padding:12}}>
+                      <Lbl c="#ff1133">⚠️ NON-NEGOTIABLE RULES</Lbl>
+                      <div style={{fontSize:10,color:"#9080bb",lineHeight:2}}>
+                        ❌ Max {MEME.includes(sel)?"2":"3"}x leverage — KABHI exceed nahi<br/>
+                        ❌ Bina SL ke KABHI trade nahi<br/>
+                        ❌ FOMC / CPI days — AVOID<br/>
+                        ❌ Loss ke baad same day trade NAHI<br/>
+                        ❌ 3+ trades per week NAHI<br/>
+                        ✅ ISOLATED margin always<br/>
+                        ✅ TP1 hit → SL breakeven<br/>
+                        ✅ Max 15% capital on this strategy
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+          </>
+        )}
+
+        <div style={{textAlign:"center",marginTop:16,padding:10,borderTop:`1px solid ${bdr}`,fontSize:8,color:"#403366",lineHeight:1.7}}>
+          ⚠️ Educational tool — always verify manually · Always use SL · Max 15% capital
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ Sub-components ═══
+function Lbl({children,c="#605088"}){ return <div style={{fontSize:8.5,fontWeight:700,color:c,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>{children}</div>; }
+
+function B({children,on,fn,clr="#ff3300"}){ return <button onClick={fn} style={{padding:"4px 9px",borderRadius:5,fontSize:9.5,fontWeight:700,cursor:"pointer",border:`1px solid ${on?clr:"#1a1230"}`,background:on?`${clr}15`:"#0d0918",color:on?clr:"#9080bb",transition:"all .15s"}}>{children}</button>; }
+
+function Stat({l,v,c}){ return <div style={{background:"#0d0918",border:"1px solid #1a1230",borderRadius:7,padding:"7px 5px",textAlign:"center",flex:1}}><div style={{fontSize:7,color:"#605088",textTransform:"uppercase",letterSpacing:1}}>{l}</div><div style={{fontSize:13,fontWeight:900,color:c,lineHeight:1,marginTop:2}}>{v}</div></div>; }
+
+function MiniCard({t,v,c}){ return <div style={{flex:1,textAlign:"center",padding:"6px 2px",background:"#0d0918",border:"1px solid #1a1230",borderRadius:7}}><div style={{fontSize:6.5,color:"#605088",textTransform:"uppercase",letterSpacing:.5}}>{t}</div><div style={{fontSize:13,fontWeight:900,color:c,lineHeight:1,marginTop:1}}>{v}</div></div>; }
+
+function Check({pass,name,val,why,i}){
+  return <div style={{background:pass?"#00ff8804":"#0d0918",border:`1px solid ${pass?"#00ff8818":"#1a1230"}`,borderRadius:7,padding:"7px 9px",marginBottom:3}}>
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <div style={{width:18,height:18,borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",background:pass?"#00ff88":"#ff1133",color:pass?"#000":"#fff",fontSize:8,fontWeight:800,flexShrink:0}}>{pass?"✓":"✗"}</div>
+      <span style={{flex:1,fontSize:10.5,fontWeight:700,color:pass?"#00ff88":"#9080bb"}}>{name}</span>
+      <span style={{fontSize:9,fontWeight:700,color:pass?"#18ffff":"#605088",maxWidth:130,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{val}</span>
+    </div>
+    {why && <div style={{paddingLeft:24,fontSize:9.5,color:"#9080bb",lineHeight:1.5,marginTop:3}}>{why}</div>}
+  </div>;
+}
+
+function NoTrade({s,why}){
+  return <div style={{textAlign:"center",padding:28}}>
+    <div style={{fontSize:40}}>🚫</div>
+    <div style={{fontSize:15,fontWeight:800,color:"#ff1133",marginTop:6}}>NO TRADE — {s||0}/18</div>
+    <div style={{fontSize:10.5,color:"#605088",marginTop:5,lineHeight:1.7}}>Score 8+ chahiye trade ke liye. Abhi setup nahi bana.</div>
+    {why && <div style={{fontSize:10.5,color:"#9080bb",marginTop:6,lineHeight:1.7,textAlign:"left",padding:"8px 12px",background:"#0d0918",borderRadius:8,border:"1px solid #1a1230"}}>{why}</div>}
+  </div>;
+}
+
+const inp = {width:"100%",padding:"6px 8px",borderRadius:5,border:"1px solid #1a1230",background:"#0d0918",color:"#f0eaff",fontSize:10.5,outline:"none",boxSizing:"border-box",marginTop:3};
+
+    
+    // ═══ RENDER ═══
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
