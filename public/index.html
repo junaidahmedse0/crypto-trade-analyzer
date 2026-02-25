@@ -4,13 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Crypto Trade Analyzer — SL Hunt + EMA SSL RSI</title>
-  <meta name="description" content="18-Point Dual Strategy AI Trade Analyzer with real-time Binance data">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #06040e; overflow-x: hidden; }
     @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     @keyframes pulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
-    /* Scrollbar */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: #06040e; }
     ::-webkit-scrollbar-thumb { background: #1a1230; border-radius: 4px; }
@@ -18,17 +16,12 @@
 </head>
 <body>
   <div id="root"></div>
-  
-  <!-- React CDN -->
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-  
   <script type="text/babel">
     const { useState, useCallback, useRef } = React;
-    
-    // ═══ APP CODE INJECTED HERE ═══
-    
+
 /* ═══════════════════════════════════════════════════════════
    CRYPTO TRADE ANALYZER — SENIOR EDITION
    
@@ -275,21 +268,24 @@ async function getLiveData(coin) {
 }
 
 // ═══ AI CALL (with 60s timeout) ═══
-async function callAI(promptText) {
+async function callAI(prompt) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    // Use backend proxy (no CORS issues)
-    const r = await fetch(`${BACKEND_URL}/api/analyze`, {
-      method:"POST", 
-      headers:{"Content-Type":"application/json"},
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers:{"Content-Type":"application/json"},
       signal: controller.signal,
-      body: JSON.stringify({ prompt: promptText })
+      body: JSON.stringify({
+        model:"claude-sonnet-4-20250514", max_tokens:2500,
+        tools:[{type:"web_search_20250305",name:"web_search"}],
+        messages:[{role:"user",content:prompt}]
+      })
     });
     clearTimeout(timeout);
     const d = await r.json();
-    if(!d.success) throw new Error(d.error || "AI call failed");
-    return d.text;
+    let t = "";
+    if(d.content) for(const b of d.content) if(b.type==="text") t += b.text;
+    return t;
   } catch(e) {
     clearTimeout(timeout);
     if(e.name === 'AbortError') throw new Error("AI timeout — try again");
@@ -697,7 +693,7 @@ function App() {
 
             {/* Tabs */}
             <div style={{display:"flex",gap:2,marginBottom:8,background:card,borderRadius:9,padding:3,border:`1px solid ${bdr}`}}>
-              {["🎯Hunt","📈Tech","📰News","📋Trade","🛡️Risk"].map((t,i)=>
+              {["🎯Hunt","📈Tech","📰News","📋Trade","🛡️Risk","📝Prompt"].map((t,i)=>
                 <button key={i} onClick={()=>setTab(i)} style={{
                   flex:1,padding:"6px 2px",borderRadius:6,border:"none",fontSize:9,fontWeight:700,cursor:"pointer",
                   background:tab===i?"#ff330018":"transparent",color:tab===i?"#ff3300":"#605088",transition:"all .15s"
@@ -1304,6 +1300,139 @@ function App() {
               </div>
             )}
 
+            {/* ══ TAB 5: PROMPT — Copy & paste to any AI ══ */}
+            {tab===5 && (
+              <div>
+                {/* AI Tool Links */}
+                <div style={{background:"linear-gradient(135deg,#1a1230,#0d0918)",border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#ff3300",marginBottom:8}}>🔗 PASTE PROMPT IN THESE TOOLS:</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    {[
+                      {n:"DeepSeek",url:"https://chat.deepseek.com",c:"#4d6bfe"},
+                      {n:"Qwen",url:"https://qwen.ai",c:"#6366f1"},
+                      {n:"Claude",url:"https://claude.ai",c:"#d97706"},
+                      {n:"ChatGPT",url:"https://chat.openai.com",c:"#10a37f"},
+                      {n:"Gemini",url:"https://gemini.google.com",c:"#4285f4"},
+                      {n:"Grok",url:"https://grok.x.ai",c:"#fff",bg:"#000"},
+                    ].map(t=><a key={t.n} href={t.url} target="_blank" rel="noopener noreferrer" style={{
+                      padding:"5px 10px",borderRadius:6,fontSize:9,fontWeight:700,
+                      background:t.bg||t.c+"18",border:`1px solid ${t.c}40`,color:t.c,
+                      textDecoration:"none",cursor:"pointer"
+                    }}>{t.n} ↗</a>)}
+                  </div>
+                  <div style={{fontSize:8,color:"#605088",marginTop:6}}>Koi bhi AI kholo → neeche ka prompt paste karo → analysis compare karo</div>
+                </div>
+
+                {/* Generated Prompt */}
+                {(()=>{
+                  const p = live?.price || parseFloat(manualPrice) || 0;
+                  const f = live?.funding || null;
+                  const lsL = live?.lsLong || null;
+                  const lsS = live?.lsShort || null;
+                  const oi = live?.oi || null;
+                  const fear = R?.fear_greed || 0;
+                  const isMeme = ["DOGE","PEPE","SHIB","BONK","WIF","FLOKI","FARTCOIN","NEIRO","TRUMP","MEME"].includes(sel);
+                  const maxLev = isMeme ? 2 : 3;
+                  const risk$ = Math.round(cap * 0.03);
+
+                  // Build data section from existing results
+                  const existingData = R ? `
+EXISTING ANALYSIS DATA (verify/update with your search):
+- Current Price: $${p || "find from search"}
+- Direction Found: ${R.dir || "?"}
+- Hunt Type: ${R.huntType || "?"}
+- Crowd: ${R.crowdPct || "?"}
+- Hunt Zone: ${R.huntZone || "?"}
+- Fear/Greed: ${fear || "?"}
+- Mood: ${R.mood || "?"}
+${R.trade?.entry ? `- Entry: $${R.trade.entry}` : ""}
+${R.trade?.sl ? `- SL: $${R.trade.sl}` : ""}
+${R.trade?.tp1?.p ? `- TP1: $${R.trade.tp1.p}, TP2: $${R.trade.tp2?.p || "?"}, TP3: $${R.trade.tp3?.p || "?"}` : ""}
+` : "";
+
+                  const fullPrompt = `You are a SENIOR crypto derivatives trader. Analyze ${sel} for a futures trade.
+
+CURRENT DATA:
+- Coin: ${sel}
+- Current Price: $${p || "[search for current price]"}
+- Capital: $${cap}
+- Risk per trade: 3% = $${risk$}
+- Max Leverage: ${maxLev}x ISOLATED
+- Fear/Greed Index: ${fear || "[search]"}
+${f !== null ? `- Funding Rate: ${f}` : ""}
+${lsL !== null ? `- Long Ratio: ${(lsL*100).toFixed(1)}% / Short Ratio: ${(lsS*100).toFixed(1)}%` : ""}
+${oi !== null ? `- Open Interest: $${(oi/1e9).toFixed(2)}B` : ""}
+${existingData}
+
+SEARCH & ANALYZE these data points:
+1. ${sel} current price, 24h high/low, 24h change %
+2. Funding rate, Long/Short ratio, Open Interest from Coinglass
+3. Liquidation heatmap — where are the clusters?
+4. RSI (4H), EMA 200, EMA 20, ADX, SSL Channel status
+5. Whale activity — exchange inflows/outflows
+6. Recent news impact — any major events?
+7. Support & resistance levels
+
+SL HUNT STRATEGY (12 points):
+- If Shorts > 55% → Market will HUNT shorts UPWARD → go LONG
+- If Longs > 60% → Market will HUNT longs DOWNWARD → go SHORT
+- Find where SL clusters are → that's the Hunt Zone
+- Score these 12 factors (pass/fail each):
+  1. Long/Short Ratio 2. Open Interest 3. Funding Rate 4. Liq Clusters
+  5. RSI 4H 6. Whale Activity 7. Divergence 8. Key Level
+  9. Volume 10. Exchange Flow 11. SL+Liq Overlap 12. Stacked Layers
+
+TECHNICAL STRATEGY (6 points):
+  1. EMA 200 Daily 2. ADX 14 3. SSL Channel 4. EMA 20 vs Price 5. RSI vs 50 6. Candle Strength
+
+RESPOND IN JSON ONLY (no markdown, no explanation):
+{"coin":"${sel}","price":<current>,"price_24h_high":<>,"price_24h_low":<>,"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu explanation>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED","fear_greed":${fear||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
+"slHunt":[{"n":"Long/Short Ratio","v":"<value>","p":<true/false>,"d":"<1 line Roman Urdu>"},{"n":"Open Interest","v":"<>","p":<>,"d":"<>"},{"n":"Funding Rate","v":"<>","p":<>,"d":"<>"},{"n":"Liq Cluster","v":"<>","p":<>,"d":"<>"},{"n":"RSI 4H","v":"<>","p":<>,"d":"<>"},{"n":"Whale Activity","v":"<>","p":<>,"d":"<>"},{"n":"Divergence","v":"<>","p":<>,"d":"<>"},{"n":"Key Level","v":"<>","p":<>,"d":"<>"},{"n":"Volume","v":"<>","p":<>,"d":"<>"},{"n":"Exchange Flow","v":"<>","p":<>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<>","p":<>,"d":"<>"},{"n":"Stacked Layers","v":"<>","p":<>,"d":"<>"}],
+"emaSSL":[{"n":"EMA 200 Daily","v":"<>","p":<>,"d":"<>"},{"n":"ADX 14","v":"<>","p":<>,"d":"<>"},{"n":"SSL Channel","v":"<>","p":<>,"d":"<>"},{"n":"EMA 20 vs Price","v":"<>","p":<>,"d":"<>"},{"n":"RSI vs 50","v":"<>","p":<>,"d":"<>"},{"n":"Candle Strength","v":"<>","p":<>,"d":"<>"}],
+"trade":{"entry":<price>,"sl":<price>,"sl_why":"<Roman Urdu>","sl_bad":["<mistake1>","<mistake2>"],"tp1":{"p":<price>,"close":25},"tp2":{"p":<price>,"close":30},"tp3":{"p":<price>,"close":30},"tp4":{"trail":3,"close":15},"lev":${maxLev},"margin":<$>,"rr":"<1:X>","profit":{"low":<$>,"mid":<$>,"high":<$>},"timeline":"<timeframe>"},
+"dip":{"on":<bool>,"dir":"<LONG/SHORT>","entry":<price>,"sl":<price>,"tp":<price>,"profit":<$>},
+"levels":{"sup":[<price1>,<price2>],"res":[<price1>,<price2>]},
+"summary":"<Roman Urdu: 1.KYA KARUN? 2.KAB? 3.KAHAN ENTRY? 4.KAB NIKLON?>"}`;
+
+                  const copyPrompt = () => {
+                    navigator.clipboard.writeText(fullPrompt).then(()=>{
+                      const btn = document.getElementById('copyBtn');
+                      if(btn) { btn.textContent = '✅ COPIED!'; setTimeout(()=>{ btn.textContent = '📋 COPY FULL PROMPT'; }, 2000); }
+                    });
+                  };
+
+                  return <>
+                    {/* Copy Button */}
+                    <button id="copyBtn" onClick={copyPrompt} style={{
+                      width:"100%",padding:"12px 0",borderRadius:10,border:"2px solid #ff3300",
+                      background:"linear-gradient(135deg,#ff330018,#ff550010)",
+                      color:"#ff3300",fontSize:13,fontWeight:800,cursor:"pointer",marginBottom:8,
+                      transition:"all .2s"
+                    }}>📋 COPY FULL PROMPT</button>
+
+                    {/* Prompt Preview */}
+                    <div style={{background:"#0a0612",border:`1px solid ${bdr}`,borderRadius:10,padding:10,maxHeight:400,overflow:"auto"}}>
+                      <pre style={{fontSize:8.5,color:"#9080bb",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word",margin:0,fontFamily:"'SF Mono','Fira Code',monospace"}}>{fullPrompt}</pre>
+                    </div>
+
+                    {/* Instructions */}
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:10,marginTop:8}}>
+                      <div style={{fontSize:9,fontWeight:800,color:"#ffcc00",marginBottom:6}}>📌 HOW TO USE:</div>
+                      <div style={{fontSize:9,color:"#9080bb",lineHeight:1.8}}>
+                        1️⃣ Upar "COPY FULL PROMPT" press karo<br/>
+                        2️⃣ DeepSeek/Qwen/Claude/ChatGPT kholo (links upar hain)<br/>
+                        3️⃣ Prompt paste karo aur send karo<br/>
+                        4️⃣ JSON response aayega — compare karo is tool se<br/>
+                        5️⃣ Agar 2+ tools same direction dein → HIGH confidence!<br/><br/>
+                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> DeepSeek pe "Search" ON karo for latest data<br/>
+                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> Claude pe "Search the web" enable karo
+                      </div>
+                    </div>
+                  </>;
+                })()}
+              </div>
+            )}
+
           </>
         )}
 
@@ -1345,9 +1474,6 @@ function NoTrade({s,why}){
 }
 
 const inp = {width:"100%",padding:"6px 8px",borderRadius:5,border:"1px solid #1a1230",background:"#0d0918",color:"#f0eaff",fontSize:10.5,outline:"none",boxSizing:"border-box",marginTop:3};
-
-    
-    // ═══ RENDER ═══
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
