@@ -2,7 +2,7 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "functions": {
-    "api/crypto.js": { "maxDuration": 10 },
+    "api/crypto.js": { "maxDuration": 25 },
     "api/analyze.js": { "maxDuration": 60 }
   },
   "rewrites": [

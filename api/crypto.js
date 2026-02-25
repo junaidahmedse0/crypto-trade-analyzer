@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   const GECKO = {BTC:'bitcoin',ETH:'ethereum',SOL:'solana',BNB:'binancecoin',XRP:'ripple',DOGE:'dogecoin',PEPE:'pepe',SUI:'sui',LINK:'chainlink',ADA:'cardano',AVAX:'avalanche-2',SHIB:'shiba-inu',ARB:'arbitrum',TRUMP:'official-trump',DOT:'polkadot',NEAR:'near',APT:'aptos',WIF:'dogwifhat',BONK:'bonk',FLOKI:'floki'};
   const errs = [];
 
-  async function sf(url, label, timeout = 7000) {
+  async function sf(url, label, timeout = 6000) {
     try {
       const c = new AbortController();
       const t = setTimeout(() => c.abort(), timeout);
@@ -45,10 +45,15 @@ export default async function handler(req, res) {
   const price = priceData ? { price:+priceData.lastPrice, high24:+priceData.highPrice, low24:+priceData.lowPrice, change24:+priceData.priceChangePercent, volume:+priceData.quoteVolume, source: priceData._src || 'binance' } : null;
   const cp = price ? price.price : 0;
 
-  // ═══ 2. KLINES — Binance SPOT (always works! All indicators from these) ═══
-  const [k4hRes, k1dRes] = await Promise.all([
+  // ═══ 2. ALL DATA IN PARALLEL (speed optimization!) ═══
+  const [k4hRes, k1dRes, bybitLS, bybitOI, bybitFund, derivs, fgRes] = await Promise.all([
     sf('https://data-api.binance.vision/api/v3/klines?symbol=' + sym + '&interval=4h&limit=210', 'spot-k4h'),
     sf('https://data-api.binance.vision/api/v3/klines?symbol=' + sym + '&interval=1d&limit=210', 'spot-k1d'),
+    sf('https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=' + sym + '&period=4h&limit=1', 'bybit-ls'),
+    sf('https://api.bybit.com/v5/market/open-interest?category=linear&symbol=' + sym + '&intervalTime=4h&limit=1', 'bybit-oi'),
+    sf('https://api.bybit.com/v5/market/funding/history?category=linear&symbol=' + sym + '&limit=1', 'bybit-fund'),
+    sf('https://api.coingecko.com/api/v3/derivatives?include_tickers=unexpired', 'cg-derivs'),
+    sf('https://api.alternative.me/fng/?limit=1', 'fear-greed'),
   ]);
 
   // ═══ 3. CALCULATE INDICATORS from real candle data ═══
@@ -97,9 +102,8 @@ export default async function handler(req, res) {
     };
   }
 
-  // ═══ 4. DERIVATIVES — CoinGecko (free, works globally!) ═══
+  // ═══ 4. DERIVATIVES — Parse parallel results ═══
   let funding = null, openInterest = null;
-  const derivs = await sf('https://api.coingecko.com/api/v3/derivatives?include_tickers=unexpired', 'cg-derivs');
   if (Array.isArray(derivs)) {
     const perps = derivs.filter(d => d.symbol && d.symbol.toUpperCase().includes(CU) && d.contract_type === 'perpetual');
     if (perps.length > 0) {
@@ -118,11 +122,10 @@ export default async function handler(req, res) {
     }
   }
 
-  // ═══ 5. LONG/SHORT + OI + FUNDING — Try Bybit FIRST (free, works globally!) ═══
+  // ═══ 5. LONG/SHORT + OI + FUNDING — Parse Bybit parallel results ═══
   let longShort = null, topTrader = null, takerVolume = null;
 
-  // 5a. Bybit L/S Ratio (FREE, no key, works from US!)
-  const bybitLS = await sf('https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=' + sym + '&period=4h&limit=1', 'bybit-ls');
+  // Bybit L/S Ratio
   if (bybitLS && bybitLS.result && bybitLS.result.list && bybitLS.result.list[0]) {
     const b = bybitLS.result.list[0];
     const buyR = parseFloat(b.buyRatio);
@@ -130,31 +133,25 @@ export default async function handler(req, res) {
     longShort = { longPct: (buyR * 100).toFixed(2) + '%', shortPct: (sellR * 100).toFixed(2) + '%', longRatio: buyR, shortRatio: sellR, _source: 'bybit' };
   }
 
-  // 5b. Bybit OI (FREE, works globally!)
-  if (!openInterest) {
-    const bybitOI = await sf('https://api.bybit.com/v5/market/open-interest?category=linear&symbol=' + sym + '&intervalTime=4h&limit=1', 'bybit-oi');
-    if (bybitOI && bybitOI.result && bybitOI.result.list && bybitOI.result.list[0]) {
-      const oi = parseFloat(bybitOI.result.list[0].openInterest);
-      openInterest = { coins: oi, valueUSD: oi * cp, formatted: '$' + (oi * cp / 1e9).toFixed(2) + 'B', _source: 'bybit' };
-    }
+  // Bybit OI
+  if (!openInterest && bybitOI && bybitOI.result && bybitOI.result.list && bybitOI.result.list[0]) {
+    const oi = parseFloat(bybitOI.result.list[0].openInterest);
+    openInterest = { coins: oi, valueUSD: oi * cp, formatted: '$' + (oi * cp / 1e9).toFixed(2) + 'B', _source: 'bybit' };
   }
 
-  // 5c. Bybit Funding Rate (FREE!)
-  if (!funding) {
-    const bybitFund = await sf('https://api.bybit.com/v5/market/funding/history?category=linear&symbol=' + sym + '&limit=1', 'bybit-fund');
-    if (bybitFund && bybitFund.result && bybitFund.result.list && bybitFund.result.list[0]) {
-      const fr = parseFloat(bybitFund.result.list[0].fundingRate);
-      funding = { rate: fr, ratePct: (fr * 100).toFixed(4) + '%', _source: 'bybit' };
-    }
+  // Bybit Funding
+  if (!funding && bybitFund && bybitFund.result && bybitFund.result.list && bybitFund.result.list[0]) {
+    const fr = parseFloat(bybitFund.result.list[0].fundingRate);
+    funding = { rate: fr, ratePct: (fr * 100).toFixed(4) + '%', _source: 'bybit' };
   }
 
-  // 5d. Binance Futures fallback (may fail from US — 451)
+  // Binance Futures fallback (may fail from US — 451, fast 3s timeout)
   const [lsRes, topRes, takerRes, oiRes, fundRes] = await Promise.all([
-    sf('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-ls'),
-    sf('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-top'),
-    sf('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-taker'),
-    sf('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + sym, 'bn-oi'),
-    sf('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + sym, 'bn-fund'),
+    sf('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-ls', 3000),
+    sf('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-top', 3000),
+    sf('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' + sym + '&period=4h&limit=1', 'bn-taker', 3000),
+    sf('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + sym, 'bn-oi', 3000),
+    sf('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + sym, 'bn-fund', 3000),
   ]);
 
   // Use Binance futures data ONLY if not already filled by Bybit/CoinGecko
@@ -174,8 +171,7 @@ export default async function handler(req, res) {
     funding = { rate: +fundRes.lastFundingRate, ratePct: (+fundRes.lastFundingRate * 100).toFixed(4) + '%', _source: 'binance' };
   }
 
-  // ═══ 6. FEAR & GREED INDEX ═══
-  const fgRes = await sf('https://api.alternative.me/fng/?limit=1', 'fear-greed');
+  // ═══ 6. FEAR & GREED — Already fetched in parallel ═══
   const fearGreed = fgRes && fgRes.data && fgRes.data[0] ? { value: parseInt(fgRes.data[0].value), label: fgRes.data[0].value_classification } : null;
 
   // ═══ RESPONSE ═══

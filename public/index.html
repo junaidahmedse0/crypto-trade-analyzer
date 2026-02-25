@@ -76,22 +76,11 @@ const BACKEND_URL = window.location.origin;
 async function getBackendPrice(coin) {
   if(!BACKEND_URL) return null;
   try {
-    const r = await fetch(`${BACKEND_URL}/api/crypto?coin=${coin}`, {signal: AbortSignal.timeout(5000)});
+    const r = await fetch(`${BACKEND_URL}/api/crypto?coin=${coin}`, {signal: AbortSignal.timeout(15000)});
     if(!r.ok) return null;
     const d = await r.json();
-    if(!d.success || !d.price?.price) return null;
-    return {
-      price: d.price.price,
-      high24: d.price.high24,
-      low24: d.price.low24,
-      change24: d.price.change24,
-      vol24usd: d.price.volume,
-      funding: d.funding?.rate || null,
-      oi: d.openInterest?.valueUSD || null,
-      lsLong: d.longShortRatio?.longRatio || null,
-      lsShort: d.longShortRatio?.shortRatio || null,
-      source: "BINANCE (real-time)",
-    };
+    if(!d.success) return null;
+    return d; // Return RAW backend response — getLiveData will parse all fields
   } catch { return null; }
 }
 
@@ -1386,73 +1375,134 @@ function App() {
                 {/* Generated Prompt */}
                 {(()=>{
                   const p = live?.price || parseFloat(manualPrice) || 0;
-                  const f = live?.funding || null;
-                  const lsL = live?.lsLong || null;
-                  const lsS = live?.lsShort || null;
-                  const oi = live?.oi || null;
-                  const fear = R?.fear_greed || 0;
+                  const f = live?.fundingPct || (live?.funding ? (live.funding*100).toFixed(4)+'%' : null);
+                  const lsL = live?.lsLongPct || (live?.lsLong ? (live.lsLong*100).toFixed(2)+'%' : null);
+                  const lsS = live?.lsShortPct || (live?.lsShort ? (live.lsShort*100).toFixed(2)+'%' : null);
+                  const oi = live?.oiFormatted || (live?.oi ? '$'+(live.oi/1e9).toFixed(2)+'B' : null);
+                  const fear = live?.fearGreed || R?.fear_greed || 0;
+                  const fearLbl = live?.fearLabel || (fear<=10?"EXTREME FEAR":fear<=25?"FEAR":fear<=45?"NEUTRAL":fear<=75?"GREED":"EXTREME GREED");
                   const isMeme = ["DOGE","PEPE","SHIB","BONK","WIF","FLOKI","FARTCOIN","NEIRO","TRUMP","MEME"].includes(sel);
                   const maxLev = isMeme ? 2 : 3;
                   const risk$ = Math.round(cap * 0.03);
 
-                  // Build data section from existing results
-                  const existingData = R ? `
-EXISTING ANALYSIS DATA (verify/update with your search):
-- Current Price: $${p || "find from search"}
-- Direction Found: ${R.dir || "?"}
-- Hunt Type: ${R.huntType || "?"}
-- Crowd: ${R.crowdPct || "?"}
-- Hunt Zone: ${R.huntZone || "?"}
-- Fear/Greed: ${fear || "?"}
-- Mood: ${R.mood || "?"}
-${R.trade?.entry ? `- Entry: $${R.trade.entry}` : ""}
-${R.trade?.sl ? `- SL: $${R.trade.sl}` : ""}
-${R.trade?.tp1?.p ? `- TP1: $${R.trade.tp1.p}, TP2: $${R.trade.tp2?.p || "?"}, TP3: $${R.trade.tp3?.p || "?"}` : ""}
-` : "";
+                  const fullPrompt = `You are a SENIOR crypto derivatives trader with 10+ years experience. I need a COMPLETE trade analysis for ${sel}/USDT futures.
 
-                  const fullPrompt = `You are a SENIOR crypto derivatives trader. Analyze ${sel} for a futures trade.
+═══════════════════════════════════════
+📊 VERIFIED REAL-TIME MARKET DATA
+═══════════════════════════════════════
+Coin: ${sel}/USDT (Futures Perpetual)
+Capital: $${cap} | Risk: 3% = $${risk$} | Max Leverage: ${maxLev}x ISOLATED
+Current Price: $${p || "[search for current price]"}
+24H Range: $${live?.low24 || "?"} — $${live?.high24 || "?"}
+24H Change: ${live?.change24 ? live.change24.toFixed(2)+'%' : "?"}
+24H Volume: ${live?.vol24 ? '$'+(live.vol24/1e9).toFixed(2)+'B' : "?"}
 
-CURRENT DATA:
-- Coin: ${sel}
-- Current Price: $${p || "[search for current price]"}
-- Capital: $${cap}
-- Risk per trade: 3% = $${risk$}
-- Max Leverage: ${maxLev}x ISOLATED
-- Fear/Greed Index: ${fear || "[search]"}
-${f !== null ? `- Funding Rate: ${f}` : ""}
-${lsL !== null ? `- Long Ratio: ${(lsL*100).toFixed(1)}% / Short Ratio: ${(lsS*100).toFixed(1)}%` : ""}
-${oi !== null ? `- Open Interest: $${(oi/1e9).toFixed(2)}B` : ""}
-${existingData}
+═══ DERIVATIVES DATA ═══
+${f ? `Funding Rate: ${f} ${parseFloat(f)>0 ? '(longs pay shorts → bearish bias)' : '(shorts pay longs → bullish bias)'}` : 'Funding Rate: [search from CoinGlass]'}
+${lsL ? `Long/Short Ratio: ${lsL} longs / ${lsS} shorts ${parseFloat(lsL)>55 ? '⚠️ LONGS OVERLOADED' : parseFloat(lsS)>55 ? '⚠️ SHORTS OVERLOADED' : ''}` : 'Long/Short Ratio: [search from CoinGlass]'}
+${live?.topTraderLong ? `Top Traders: ${live.topTraderLong} longs / ${live.topTraderShort} shorts` : ''}
+${oi ? `Open Interest: ${oi} ${live?.oiDirection ? '('+live.oiDirection+' '+live.oiChange+')' : ''}` : 'Open Interest: [search from CoinGlass]'}
+${live?.takerDominance ? `Taker Volume: ${live.takerDominance} dominant (ratio: ${live.takerRatio})` : ''}
 
-SEARCH & ANALYZE these data points:
-1. ${sel} current price, 24h high/low, 24h change %
-2. Funding rate, Long/Short ratio, Open Interest from Coinglass
-3. Liquidation heatmap — where are the clusters?
-4. RSI (4H), EMA 200, EMA 20, ADX, SSL Channel status
-5. Whale activity — exchange inflows/outflows
-6. Recent news impact — any major events?
-7. Support & resistance levels
+═══ TECHNICAL INDICATORS (Calculated from real candles) ═══
+${live?.rsi4h ? `RSI 14 (4H): ${live.rsi4h} ${live.rsi4h>70 ? '⚠️ OVERBOUGHT' : live.rsi4h<30 ? '⚠️ OVERSOLD' : ''}` : 'RSI 4H: [search from TradingView]'}
+${live?.rsi1d ? `RSI 14 (Daily): ${live.rsi1d}` : ''}
+${live?.ema200d ? `EMA 200 (Daily): $${live.ema200d} — Price is ${live.priceVsEma200} EMA200` : 'EMA 200 Daily: [search]'}
+${live?.ema20d ? `EMA 20 (Daily): $${live.ema20d} — Price is ${live.priceVsEma20} EMA20` : ''}
+${live?.ema20_4h ? `EMA 20 (4H): $${live.ema20_4h}` : ''}
+${live?.adx4h ? `ADX 14 (4H): ${live.adx4h} ${live.adx4h>25 ? '(TRENDING)' : '(RANGING)'}` : 'ADX 14: [search]'}
+${live?.adx1d ? `ADX 14 (Daily): ${live.adx1d}` : ''}
+${live?.sslChannel ? `SSL Channel (4H): ${live.sslChannel} (High: $${live.sslHigh}, Low: $${live.sslLow})` : 'SSL Channel: [search]'}
+${live?.volumeRatio ? `Volume: ${live.volumeStatus} (${live.volumeRatio}x vs 20-period avg)` : ''}
+${live?.candleStrength ? `Last 3 Candles: ${live.candleStrength}` : ''}
 
-SL HUNT STRATEGY (12 points):
-- If Shorts > 55% → Market will HUNT shorts UPWARD → go LONG
-- If Longs > 60% → Market will HUNT longs DOWNWARD → go SHORT
-- Find where SL clusters are → that's the Hunt Zone
-- Score these 12 factors (pass/fail each):
-  1. Long/Short Ratio 2. Open Interest 3. Funding Rate 4. Liq Clusters
-  5. RSI 4H 6. Whale Activity 7. Divergence 8. Key Level
-  9. Volume 10. Exchange Flow 11. SL+Liq Overlap 12. Stacked Layers
+═══ SENTIMENT ═══
+Fear/Greed Index: ${fear} — ${fearLbl}
 
-TECHNICAL STRATEGY (6 points):
-  1. EMA 200 Daily 2. ADX 14 3. SSL Channel 4. EMA 20 vs Price 5. RSI vs 50 6. Candle Strength
+${R ? `═══ PREVIOUS AI ANALYSIS (verify & update) ═══
+Direction: ${R.dir || "?"}
+Hunt Type: ${R.huntType || "?"}
+Crowd: ${R.crowdPct || "?"}
+Hunt Zone: ${R.huntZone || "?"}
+Score: SL Hunt ${(R.slHunt||[]).filter(x=>x.p).length}/12 + Tech ${(R.emaSSL||[]).filter(x=>x.p).length}/6 = Total ${((R.slHunt||[]).filter(x=>x.p).length + (R.emaSSL||[]).filter(x=>x.p).length)}/18
+${R.trade?.entry ? `Entry: $${R.trade.entry} | SL: $${R.trade.sl} | TP1: $${R.trade.tp1?.p}` : ''}` : ''}
 
-RESPOND IN JSON ONLY (no markdown, no explanation):
-{"coin":"${sel}","price":<current>,"price_24h_high":<>,"price_24h_low":<>,"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu explanation>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED","fear_greed":${fear||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
-"slHunt":[{"n":"Long/Short Ratio","v":"<value>","p":<true/false>,"d":"<1 line Roman Urdu>"},{"n":"Open Interest","v":"<>","p":<>,"d":"<>"},{"n":"Funding Rate","v":"<>","p":<>,"d":"<>"},{"n":"Liq Cluster","v":"<>","p":<>,"d":"<>"},{"n":"RSI 4H","v":"<>","p":<>,"d":"<>"},{"n":"Whale Activity","v":"<>","p":<>,"d":"<>"},{"n":"Divergence","v":"<>","p":<>,"d":"<>"},{"n":"Key Level","v":"<>","p":<>,"d":"<>"},{"n":"Volume","v":"<>","p":<>,"d":"<>"},{"n":"Exchange Flow","v":"<>","p":<>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<>","p":<>,"d":"<>"},{"n":"Stacked Layers","v":"<>","p":<>,"d":"<>"}],
-"emaSSL":[{"n":"EMA 200 Daily","v":"<>","p":<>,"d":"<>"},{"n":"ADX 14","v":"<>","p":<>,"d":"<>"},{"n":"SSL Channel","v":"<>","p":<>,"d":"<>"},{"n":"EMA 20 vs Price","v":"<>","p":<>,"d":"<>"},{"n":"RSI vs 50","v":"<>","p":<>,"d":"<>"},{"n":"Candle Strength","v":"<>","p":<>,"d":"<>"}],
-"trade":{"entry":<price>,"sl":<price>,"sl_why":"<Roman Urdu>","sl_bad":["<mistake1>","<mistake2>"],"tp1":{"p":<price>,"close":25},"tp2":{"p":<price>,"close":30},"tp3":{"p":<price>,"close":30},"tp4":{"trail":3,"close":15},"lev":${maxLev},"margin":<$>,"rr":"<1:X>","profit":{"low":<$>,"mid":<$>,"high":<$>},"timeline":"<timeframe>"},
-"dip":{"on":<bool>,"dir":"<LONG/SHORT>","entry":<price>,"sl":<price>,"tp":<price>,"profit":<$>},
-"levels":{"sup":[<price1>,<price2>],"res":[<price1>,<price2>]},
-"summary":"<Roman Urdu: 1.KYA KARUN? 2.KAB? 3.KAHAN ENTRY? 4.KAB NIKLON?>"}`;
+═══════════════════════════════════════
+🔍 ANALYZE THE FOLLOWING (search web for latest):
+═══════════════════════════════════════
+1. Whale activity — exchange inflows/outflows, large transactions
+2. Liquidation heatmap — where are the big liquidation clusters?
+3. Latest news — any major events affecting ${sel}?
+4. Support & Resistance key levels from charts
+5. Exchange flows — stablecoin inflows/outflows
+6. Any bearish/bullish divergences on 4H or Daily?
+
+═══════════════════════════════════════
+📋 GIVE ME COMPLETE TRADE ANALYSIS:
+═══════════════════════════════════════
+
+1. 🎯 DIRECTION: LONG ya SHORT? Ya NO TRADE? Clear reason do.
+
+2. 🔥 SL HUNT ANALYSIS (12 Points — har ek ko Pass ✓ ya Fail ✗ karo):
+   Score karo ye 12 factors:
+   1) Long/Short Ratio — Crowd kis taraf heavy hai?
+   2) Open Interest — Barh raha ya gir raha?
+   3) Funding Rate — Positive ya negative? Kya signal de raha?
+   4) Liquidation Clusters — Kahan hain? Kitne bade?
+   5) RSI 4H — Overbought/oversold? Kya direction support karta?
+   6) Whale Activity — Whales kya kar rahe? Buy ya sell?
+   7) Divergence — Koi hidden ya regular divergence?
+   8) Key Level — Price kisi important level pe hai?
+   9) Volume — Volume trend kya hai?
+   10) Exchange Flow — Exchanges pe inflow/outflow kya hai?
+   11) SL + Liquidation Overlap — SL aur liq zones overlap karte?
+   12) Stacked Layers — Multiple layers of SLs ek jagah?
+
+   Har factor ke liye batao: VALUE, PASS/FAIL, aur 1 line REASON (Roman Urdu)
+
+3. 📈 TECHNICAL ANALYSIS (6 Points):
+   1) EMA 200 Daily — Price upar ya neeche?
+   2) ADX 14 — Trend strong hai ya weak?
+   3) SSL Channel — Bullish ya bearish?
+   4) EMA 20 vs Price — Cross hua ya nahi?
+   5) RSI vs 50 — Above ya below?
+   6) Candle Strength — Last 3-5 candles ka pattern?
+
+   Har factor ke liye: VALUE, PASS/FAIL, REASON
+
+4. 📰 NEWS & SENTIMENT:
+   - Latest 2-3 major news ${sel} ke baare mein
+   - Impact: BULLISH / BEARISH / NEUTRAL?
+   - Market sentiment overall kya hai?
+
+5. 📋 COMPLETE TRADE PLAN:
+   - Entry Price: $ (exact)
+   - Stop Loss: $ (exact) — aur KYUN yahan?
+   - Take Profit 1: $ (25% close)
+   - Take Profit 2: $ (30% close)
+   - Take Profit 3: $ (30% close)
+   - Take Profit 4: Trailing stop 3% (15% close)
+   - Leverage: ${maxLev}x ISOLATED
+   - Margin Required: $
+   - Risk/Reward Ratio: 1:?
+   - Expected Profit: Low $? / Mid $? / High $?
+   - Timeline: kitne din hold karna hai?
+
+6. 🛡️ RISK MANAGEMENT:
+   - Worst case scenario kya hai?
+   - SL kitna tight/loose rakhein?
+   - 2 biggest mistakes jo is trade mein ho sakte hain
+   - Kab trade CANCEL karna chahiye?
+
+7. 💡 FINAL VERDICT (Roman Urdu mein):
+   - KYA KARUN? (LONG/SHORT/WAIT)
+   - KAB ENTRY KARUN? (exact condition)
+   - KAHAN SE ENTRY? (price)
+   - KAB NIKLON? (conditions for exit)
+   - CONFIDENCE LEVEL: LOW / MEDIUM / HIGH / VERY HIGH
+   - Overall Score: ?/18
+
+NOTE: Pure analysis Roman Urdu mein do. Simple language, clear signals. No confusion. Agar NO TRADE hai toh clearly bol do aur reason do.`;
 
                   const copyPrompt = () => {
                     navigator.clipboard.writeText(fullPrompt).then(()=>{
@@ -1480,12 +1530,14 @@ RESPOND IN JSON ONLY (no markdown, no explanation):
                       <div style={{fontSize:9,fontWeight:800,color:"#ffcc00",marginBottom:6}}>📌 HOW TO USE:</div>
                       <div style={{fontSize:9,color:"#9080bb",lineHeight:1.8}}>
                         1️⃣ Upar "COPY FULL PROMPT" press karo<br/>
-                        2️⃣ DeepSeek/Qwen/Claude/ChatGPT kholo (links upar hain)<br/>
+                        2️⃣ DeepSeek/Qwen/Claude/ChatGPT/Gemini kholo<br/>
                         3️⃣ Prompt paste karo aur send karo<br/>
-                        4️⃣ JSON response aayega — compare karo is tool se<br/>
-                        5️⃣ Agar 2+ tools same direction dein → HIGH confidence!<br/><br/>
-                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> DeepSeek pe "Search" ON karo for latest data<br/>
-                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> Claude pe "Search the web" enable karo
+                        4️⃣ AI tumhe DETAILED analysis dega — LONG/SHORT/WAIT<br/>
+                        5️⃣ Entry, SL, TP sab exact prices ke saath milenge<br/>
+                        6️⃣ Agar 2+ tools same direction dein → HIGH confidence!<br/><br/>
+                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> DeepSeek pe "Deep Think" ON karo for best analysis<br/>
+                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> Claude pe "Search the web" enable karo<br/>
+                        ⚡ <span style={{color:"#00ff88",fontWeight:700}}>TIP:</span> Yeh prompt JSON nahi mangta — seedhi Roman Urdu analysis milegi!
                       </div>
                     </div>
                   </>;
