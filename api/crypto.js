@@ -116,8 +116,28 @@ export default async function handler(req, res) {
         openInterest = { coins: totalOI / cp, valueUSD: totalOI, formatted: '$' + (totalOI / 1e9).toFixed(2) + 'B', _source: 'coingecko' };
       }
       if (fCount > 0) {
-        const avgF = fSum / fCount;
-        funding = { rate: avgF, ratePct: (avgF * 100).toFixed(4) + '%', _source: 'coingecko' };
+        let avgF = fSum / fCount;
+        // CoinGecko funding_rate values vary by exchange:
+        // Some return 0.01 meaning 0.01%, some return 0.0001 meaning 0.01%
+        // Real BTC funding is always between -0.5% and +0.5%
+        // If |avgF| > 1, it's clearly wrong scale → divide by 100
+        // If |avgF| > 0.01, it's already percentage (0.01 = 0.01%)
+        // If |avgF| < 0.01, it's decimal (0.0001 = 0.01%)
+        let ratePct;
+        if (Math.abs(avgF) > 1) {
+          // Clearly wrong scale (e.g., 7.5) → this is percentage, divide
+          ratePct = avgF.toFixed(4) + '%';
+          avgF = avgF / 100; // normalize to decimal
+        } else if (Math.abs(avgF) > 0.005) {
+          // Percentage format: 0.01 means 0.01%
+          ratePct = avgF.toFixed(4) + '%';
+          avgF = avgF / 100; // normalize to decimal
+        } else {
+          // Decimal format: 0.0001 means 0.01%
+          ratePct = (avgF * 100).toFixed(4) + '%';
+          // avgF stays as decimal
+        }
+        funding = { rate: avgF, ratePct: ratePct, _source: 'coingecko' };
       }
     }
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Crypto Trade Analyzer v3 — SL Hunt + Real Indicators</title>
+  <title>Crypto Trade Analyzer v4 — SL Hunt + Real Indicators</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #06040e; overflow-x: hidden; }
@@ -200,6 +200,10 @@ async function getLiveData(coin) {
   
   if (backend && backend.price && backend.price.price > 0) {
     const p = backend.price;
+    
+    // Enrich with CoinGecko data for 7D/30D/ATH/rank (backend doesn't have these)
+    const cg = await getGeckoData(coin).catch(()=>null);
+    
     return {
       price: p.price,
       high24: p.high24 || 0,
@@ -208,6 +212,14 @@ async function getLiveData(coin) {
       vol24: p.volume || 0,
       source: backend.source || "BINANCE (real-time)",
       note: "",
+      // CoinGecko extras (7D, 30D, ATH, rank, mcap)
+      change7d: cg?.change7d || null,
+      change30d: cg?.change30d || null,
+      mcap: cg?.mcap || null,
+      ath: cg?.ath || null,
+      athDrop: cg?.athDrop || null,
+      rank: cg?.rank || null,
+      name: cg?.name || coin,
       // EXACT Derivatives data
       funding: backend.funding?.rate || null,
       fundingPct: backend.funding?.ratePct || null,
@@ -482,7 +494,7 @@ function App() {
         setLive(prev => prev ? {...prev, price: mp2, source: "BINANCE (manual)"} : {price: mp2, source: "BINANCE (manual)"});
       } else if(data.price && data.price > 0) {
         // AI found fresh price from search — use it
-        setLive(prev => prev ? {...prev, price: data.price, source: (prev.source||"") + " → AI fresh"} : {price: data.price, source: "AI Search"});
+        setLive(prev => prev ? {...prev, price: data.price, source: "AI verified"} : {price: data.price, source: "AI Search"});
       } else if(liveData?.price > 0) {
         // Fallback to CoinGecko
         data.price = liveData.price;
@@ -624,11 +636,11 @@ function App() {
         {live && live.price > 0 && (
           <div style={{display:"flex",gap:3,marginBottom:8}}>
             {[
-              {l:"7D",v:`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`,c:live.change7d>=0?"#00ff88":"#ff1133"},
-              {l:"30D",v:`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`,c:live.change30d>=0?"#00ff88":"#ff1133"},
-              {l:"VOL",v:`$${(live.vol24/1e9).toFixed(1)}B`,c:"#ffcc00"},
-              {l:"ATH",v:`${live.athDrop?.toFixed(0)}%`,c:"#ff1133"},
-              {l:"RANK",v:`#${live.rank}`,c:"#18ffff"},
+              {l:"7D",v:live.change7d!=null?`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`:"—",c:live.change7d>=0?"#00ff88":"#ff1133"},
+              {l:"30D",v:live.change30d!=null?`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`:"—",c:live.change30d>=0?"#00ff88":"#ff1133"},
+              {l:"VOL",v:live.vol24?`$${(live.vol24/1e9).toFixed(1)}B`:"—",c:"#ffcc00"},
+              {l:"ATH",v:live.athDrop!=null?`${live.athDrop?.toFixed(0)}%`:"—",c:"#ff1133"},
+              {l:"RANK",v:live.rank?`#${live.rank}`:"—",c:"#18ffff"},
             ].map((x,i)=><div key={i} style={{flex:1,textAlign:"center",padding:"4px 2px",background:card,border:`1px solid ${bdr}`,borderRadius:5}}>
               <div style={{fontSize:6.5,color:"#605088",textTransform:"uppercase"}}>{x.l}</div>
               <div style={{fontSize:10,fontWeight:800,color:x.c}}>{x.v}</div>
@@ -967,14 +979,14 @@ function App() {
                   <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:12,marginBottom:8}}>
                     <Lbl c="#18ffff">📊 MARKET DATA (LIVE)</Lbl>
                     {[
-                      {l:"24h Volume",v:`$${(live.vol24/1e9).toFixed(2)}B`,c:"#f0eaff"},
-                      {l:"Market Cap",v:`$${(live.mcap/1e9).toFixed(1)}B`,c:"#f0eaff"},
-                      {l:"Rank",v:`#${live.rank}`,c:"#18ffff"},
-                      {l:"24h Change",v:`${live.change24>=0?"+":""}${live.change24?.toFixed(2)}%`,c:live.change24>=0?"#00ff88":"#ff1133"},
-                      {l:"7d Change",v:`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`,c:live.change7d>=0?"#00ff88":"#ff1133"},
-                      {l:"30d Change",v:`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`,c:live.change30d>=0?"#00ff88":"#ff1133"},
-                      {l:"ATH",v:f$(live.ath),c:"#ffcc00"},
-                      {l:"Drop from ATH",v:`${live.athDrop?.toFixed(1)}%`,c:"#ff1133"},
+                      {l:"24h Volume",v:live.vol24?`$${(live.vol24/1e9).toFixed(2)}B`:"—",c:"#f0eaff"},
+                      {l:"Market Cap",v:live.mcap?`$${(live.mcap/1e9).toFixed(1)}B`:"—",c:"#f0eaff"},
+                      {l:"Rank",v:live.rank?`#${live.rank}`:"—",c:"#18ffff"},
+                      {l:"24h Change",v:live.change24!=null?`${live.change24>=0?"+":""}${live.change24?.toFixed(2)}%`:"—",c:live.change24>=0?"#00ff88":"#ff1133"},
+                      {l:"7d Change",v:live.change7d!=null?`${live.change7d>=0?"+":""}${live.change7d?.toFixed(1)}%`:"—",c:live.change7d>=0?"#00ff88":"#ff1133"},
+                      {l:"30d Change",v:live.change30d!=null?`${live.change30d>=0?"+":""}${live.change30d?.toFixed(1)}%`:"—",c:live.change30d>=0?"#00ff88":"#ff1133"},
+                      {l:"ATH",v:live.ath?f$(live.ath):"—",c:"#ffcc00"},
+                      {l:"Drop from ATH",v:live.athDrop!=null?`${live.athDrop?.toFixed(1)}%`:"—",c:"#ff1133"},
                     ].map((r,i)=>(
                       <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:i<7?`1px solid ${bdr}`:"none"}}>
                         <span style={{fontSize:10,color:"#605088"}}>{r.l}</span>
