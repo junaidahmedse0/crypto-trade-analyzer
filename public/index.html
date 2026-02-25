@@ -378,6 +378,8 @@ VOLUME 24H: $${live.vol24 ? (live.vol24/1e9).toFixed(2)+"B" : "?"}`;
   }
 
   return `You are analyzing ${coin} for a futures trade. Capital: $${cap}, Risk: 3% = $${risk$}, Max Leverage: ${maxLev}x ISOLATED.
+
+CRITICAL LANGUAGE RULE: ALL text in "why", "d", "headline", "factor", "sl_why", "sl_bad", and "summary" fields MUST be in ROMAN URDU (English alphabet se likhi Urdu). Example: "Longs zyada hain, market neeche jayega". NEVER use Urdu/Arabic script (اردو). NEVER use pure English. Always Roman Urdu like spoken Pakistani trader.
 ${realData}
 
 IMPORTANT: Use the VERIFIED DATA above as your PRIMARY source. Only search web for:
@@ -395,7 +397,7 @@ Score these factors using VERIFIED DATA + web search:
 SL HUNT (12 points): L/S Ratio, OI, Funding, Liq Cluster, RSI 4H, Whale Activity, Divergence, Key Level, Volume, Exchange Flow, SL+Liq Overlap, Stacked Layers
 TECHNICAL (6 points): EMA 200 Daily, ADX 14, SSL Channel, EMA 20 vs Price, RSI vs 50, Candle Strength
 
-RESPOND IN JSON ONLY (no markdown):
+RESPOND IN JSON ONLY (no markdown). ALL "d","why","headline","summary" fields in ROMAN URDU (English letters, Urdu language — like "Market neeche ja sakta hai"). NO Urdu script, NO pure English:
 {"coin":"${coin}","price":${p||"<find>"},"price_24h_high":${live?.high24||"<>"},"price_24h_low":${live?.low24||"<>"},"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"${f<=10?"EXTREME_FEAR":f<=25?"FEAR":f<=45?"NEUTRAL":f<=75?"GREED":"EXTREME_GREED"}","fear_greed":${f||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
 "slHunt":[{"n":"Long/Short Ratio","v":"${live?.lsLongPct||"<>"} longs","p":<bool>,"d":"<1 line RU>"},{"n":"Open Interest","v":"${live?.oiFormatted||"<>"}","p":<bool>,"d":"<>"},{"n":"Funding Rate","v":"${live?.fundingPct||"<>"}","p":<bool>,"d":"<>"},{"n":"Liq Cluster","v":"<search>","p":<bool>,"d":"<>"},{"n":"RSI 4H","v":"${live?.rsi4h||"<>"}","p":<bool>,"d":"<>"},{"n":"Whale Activity","v":"<search>","p":<bool>,"d":"<>"},{"n":"Divergence","v":"<analyze>","p":<bool>,"d":"<>"},{"n":"Key Level","v":"<search>","p":<bool>,"d":"<>"},{"n":"Volume","v":"${live?.volumeStatus||"<>"}","p":<bool>,"d":"<>"},{"n":"Exchange Flow","v":"<search>","p":<bool>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<analyze>","p":<bool>,"d":"<>"},{"n":"Stacked Layers","v":"<analyze>","p":<bool>,"d":"<>"}],
 "emaSSL":[{"n":"EMA 200 Daily","v":"$${live?.ema200d||"<>"} (${live?.priceVsEma200||"?"})","p":<bool>,"d":"<>"},{"n":"ADX 14","v":"${live?.adx4h||"<>"}","p":<bool>,"d":"<>"},{"n":"SSL Channel","v":"${live?.sslChannel||"<>"}","p":<bool>,"d":"<>"},{"n":"EMA 20 vs Price","v":"$${live?.ema20d||"<>"} (${live?.priceVsEma20||"?"})","p":<bool>,"d":"<>"},{"n":"RSI vs 50","v":"${live?.rsi4h||"<>"}","p":<bool>,"d":"<>"},{"n":"Candle Strength","v":"${live?.candleStrength||"<>"}","p":<bool>,"d":"<>"}],
@@ -486,18 +488,19 @@ function App() {
       }
       if(!data) throw new Error("Parse fail — try again");
 
-      // STEP 3: Post-process — Manual price > AI price > CoinGecko
+      // STEP 3: Post-process — Manual price > Backend price > AI price
       const mp2 = parseFloat(manualPrice) || 0;
       if(mp2 > 0) {
         // Manual price is KING — override everything
         data.price = mp2;
         setLive(prev => prev ? {...prev, price: mp2, source: "BINANCE (manual)"} : {price: mp2, source: "BINANCE (manual)"});
-      } else if(data.price && data.price > 0) {
-        // AI found fresh price from search — use it
-        setLive(prev => prev ? {...prev, price: data.price, source: "AI verified"} : {price: data.price, source: "AI Search"});
       } else if(liveData?.price > 0) {
-        // Fallback to CoinGecko
+        // Backend/live price exists — use it, DON'T let AI override source
         data.price = liveData.price;
+        // Source already set correctly from getLiveData()
+      } else if(data.price && data.price > 0) {
+        // NO backend price — AI found fresh price from search
+        setLive(prev => prev ? {...prev, price: data.price, source: "AI Search"} : {price: data.price, source: "AI Search"});
       }
       // 24h high/low from CoinGecko if AI didn't provide
       if(!data.price_24h_high && liveData?.high24) data.price_24h_high = liveData.high24;
