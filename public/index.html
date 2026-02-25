@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Crypto Trade Analyzer — SL Hunt + EMA SSL RSI</title>
-  <meta name="description" content="18-Point AI Trade Analyzer with real-time Binance data">
+  <title>Crypto Trade Analyzer v3 — SL Hunt + Real Indicators</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #06040e; overflow-x: hidden; }
@@ -207,52 +206,72 @@ async function getGeckoData(coin) {
 
 // ═══ COMBINED: 6 sources, freshest price wins ═══
 async function getLiveData(coin) {
-  const [backend, bnWS, bnREST, ccap, cgFull, cgSimple] = await Promise.all([
-    getBackendPrice(coin).catch(()=>null),
-    getBinancePrice(coin).catch(()=>null),
-    getBinanceREST(coin).catch(()=>null),
-    getCoinCapPrice(coin).catch(()=>null),
-    getGeckoData(coin).catch(()=>null),
-    getGeckoSimple(coin).catch(()=>null),
-  ]);
+  // Try backend first (has ALL data — Binance + indicators + fear)
+  const backend = await getBackendPrice(coin).catch(()=>null);
   
-  // Priority: Backend (real-time) > Binance WS > Binance REST > CoinCap > CoinGecko
-  const sources = [
-    backend?.price > 0 && {d:backend, n:"BINANCE (real-time)", full:false},
-    bnWS?.price > 0 && {d:bnWS, n:"BINANCE WS", full:false},
-    bnREST?.price > 0 && {d:bnREST, n:"BINANCE REST", full:false},
-    ccap?.price > 0 && {d:ccap, n:"CoinCap.io", full:false},
-    cgFull?.price > 0 && {d:cgFull, n:"CoinGecko", full:true},
-    cgSimple?.price > 0 && {d:cgSimple, n:"CoinGecko Simple", full:false},
-  ].filter(Boolean);
-  
-  if(!sources.length) return null;
-  
-  const best = sources[0];
-  const cg = cgFull || {};
-  
-  return {
-    price: best.d.price,
-    high24: best.d.high24 || cg.high24 || best.d.price * 1.02,
-    low24: best.d.low24 || cg.low24 || best.d.price * 0.98,
-    change24: best.d.change24 || cg.change24 || ccap?.change24 || cgSimple?.change24 || 0,
-    change7d: cg.change7d || 0,
-    change30d: cg.change30d || 0,
-    vol24: best.d.vol24usd || best.d.vol24 || cg.vol24 || ccap?.vol24 || cgSimple?.vol24 || 0,
-    mcap: cg.mcap || ccap?.mcap || cgSimple?.mcap || 0,
-    ath: cg.ath || 0,
-    athDrop: cg.athDrop || 0,
-    rank: cg.rank || 0,
-    name: cg.name || coin,
-    source: best.n,
-    note: best.n.includes("BINANCE") ? "" : best.n === "CoinCap.io" ? "" : "⚠️ May be 1-5 min delayed",
-    // Backend bonus data
-    funding: backend?.funding || null,
-    oi: backend?.oi || null,
-    lsLong: backend?.lsLong || null,
-    lsShort: backend?.lsShort || null,
-  };
+  if (backend && backend.price && backend.price.price > 0) {
+    const p = backend.price;
+    return {
+      price: p.price,
+      high24: p.high24 || 0,
+      low24: p.low24 || 0,
+      change24: p.change24 || 0,
+      vol24: p.volume || 0,
+      source: backend.source || "BINANCE (real-time)",
+      note: "",
+      // EXACT Derivatives data
+      funding: backend.funding?.rate || null,
+      fundingPct: backend.funding?.ratePct || null,
+      oi: backend.openInterest?.valueUSD || null,
+      oiFormatted: backend.openInterest?.formatted || null,
+      oiChange: backend.oiChange?.changePct || null,
+      oiDirection: backend.oiChange?.direction || null,
+      lsLong: backend.longShortRatio?.longRatio || null,
+      lsShort: backend.longShortRatio?.shortRatio || null,
+      lsLongPct: backend.longShortRatio?.longPct || null,
+      lsShortPct: backend.longShortRatio?.shortPct || null,
+      topTraderLong: backend.topTraderRatio?.longPct || null,
+      topTraderShort: backend.topTraderRatio?.shortPct || null,
+      takerDominance: backend.takerVolume?.dominance || null,
+      takerRatio: backend.takerVolume?.buySellRatio || null,
+      // CALCULATED Indicators
+      rsi4h: backend.indicators?.rsi4h || null,
+      rsi1d: backend.indicators?.rsi1d || null,
+      ema200d: backend.indicators?.ema200d || null,
+      ema20d: backend.indicators?.ema20d || null,
+      ema20_4h: backend.indicators?.ema20_4h || null,
+      adx4h: backend.indicators?.adx4h || null,
+      adx1d: backend.indicators?.adx1d || null,
+      sslChannel: backend.indicators?.sslChannel || null,
+      sslHigh: backend.indicators?.sslHigh || null,
+      sslLow: backend.indicators?.sslLow || null,
+      priceVsEma200: backend.indicators?.priceVsEma200 || null,
+      priceVsEma20: backend.indicators?.priceVsEma20 || null,
+      volumeRatio: backend.indicators?.volumeRatio || null,
+      volumeStatus: backend.indicators?.volumeStatus || null,
+      candleStrength: backend.indicators?.candleStrength || null,
+      // Fear/Greed from backend
+      fearGreed: backend.fearGreed?.value || null,
+      fearLabel: backend.fearGreed?.label || null,
+      // Data quality
+      _quality: backend._dataQuality || null,
+    };
+  }
+
+  // Fallback: try CoinGecko directly (limited data)
+  const cg = await getGeckoData(coin).catch(()=>null);
+  const simple = await getGeckoSimple(coin).catch(()=>null);
+  const best = cg || simple;
+  if (best?.price > 0) {
+    return {
+      price: best.price, high24: best.high24||0, low24: best.low24||0,
+      change24: best.change24||0, vol24: best.vol24||0,
+      source: "CoinGecko", note: "⚠️ Limited data — deploy backend for full data",
+    };
+  }
+  return null;
 }
+
 
 // ═══ AI CALL (with 60s timeout) ═══
 async function callAI(promptText) {
@@ -303,30 +322,88 @@ function prompt(coin, cap, live, fear) {
   const maxLev = isMeme ? 2 : 3;
   const risk$ = Math.round(cap * 0.03);
   const p = live?.price || 0;
-  const f = fear?.value || 0;
-  const isManual = live?.source?.includes("manual");
+  const f = live?.fearGreed || fear?.value || 0;
 
-  const priceInstr = isManual 
-    ? `${coin} CONFIRMED PRICE: $${p} (from Binance, EXACT). Use $${p} for ALL calculations.\n\nSEARCH 2 times:`
-    : `${coin}${p?` (cached ~$${p} — likely STALE)`:""}\n\nSEARCH 3 times:\n1. "${coin} price USD today" — find EXACT current price. Use FRESH price for all calculations.`;
+  // Build VERIFIED DATA block from real APIs
+  let realData = "";
+  if (live) {
+    realData = `
+═══ VERIFIED REAL-TIME DATA (from Binance/APIs — use these EXACT numbers) ═══
+PRICE: $${p} (${live.source || "API"})
+24H HIGH: $${live.high24 || "?"} | 24H LOW: $${live.low24 || "?"} | CHANGE: ${live.change24 ? live.change24.toFixed(2)+"%" : "?"}
+VOLUME 24H: $${live.vol24 ? (live.vol24/1e9).toFixed(2)+"B" : "?"}`;
 
-  return `${priceInstr} Fear=${f||"?"}
-${isManual?"1":"2"}. "${coin} funding rate long short ratio open interest liquidation coinglass 2026"
-${isManual?"2":"3"}. "${coin} RSI EMA whale exchange flow support resistance crypto news 2026"
+    if (live.funding !== null && live.funding !== undefined)
+      realData += `\nFUNDING RATE: ${live.fundingPct || (live.funding*100).toFixed(4)+"%"} (${live.funding > 0 ? "longs pay shorts → bullish bias" : live.funding < 0 ? "shorts pay longs → bearish bias" : "neutral"})`;
+    
+    if (live.lsLong !== null && live.lsLong !== undefined)
+      realData += `\nLONG/SHORT RATIO: ${live.lsLongPct || (live.lsLong*100).toFixed(2)+"%"} longs / ${live.lsShortPct || (live.lsShort*100).toFixed(2)+"%"} shorts`;
+    
+    if (live.topTraderLong)
+      realData += `\nTOP TRADERS: ${live.topTraderLong} longs / ${live.topTraderShort} shorts`;
+    
+    if (live.oi !== null && live.oi !== undefined)
+      realData += `\nOPEN INTEREST: ${live.oiFormatted || "$"+(live.oi/1e9).toFixed(2)+"B"} (${live.oiDirection || "?"} ${live.oiChange || ""})`;
+    
+    if (live.takerDominance)
+      realData += `\nTAKER VOLUME: ${live.takerDominance} dominant (ratio: ${live.takerRatio})`;
+    
+    if (live.rsi4h !== null && live.rsi4h !== undefined)
+      realData += `\nRSI 4H: ${live.rsi4h} (${live.rsi4h > 70 ? "OVERBOUGHT" : live.rsi4h < 30 ? "OVERSOLD" : live.rsi4h > 50 ? "bullish" : "bearish"})`;
+    
+    if (live.rsi1d !== null && live.rsi1d !== undefined)
+      realData += `\nRSI DAILY: ${live.rsi1d}`;
+    
+    if (live.ema200d !== null && live.ema200d !== undefined)
+      realData += `\nEMA 200 DAILY: $${live.ema200d} (price ${live.priceVsEma200 || "?"})`;
+    
+    if (live.ema20d !== null && live.ema20d !== undefined)
+      realData += `\nEMA 20 DAILY: $${live.ema20d} (price ${live.priceVsEma20 || "?"})`;
+    
+    if (live.adx4h !== null && live.adx4h !== undefined)
+      realData += `\nADX 14 (4H): ${live.adx4h} (${live.adx4h > 25 ? "TRENDING" : "RANGING"})`;
+    
+    if (live.sslChannel)
+      realData += `\nSSL CHANNEL: ${live.sslChannel} (high:$${live.sslHigh} low:$${live.sslLow})`;
+    
+    if (live.volumeStatus)
+      realData += `\nVOLUME: ${live.volumeStatus} (ratio: ${live.volumeRatio}x vs avg)`;
+    
+    if (live.candleStrength)
+      realData += `\nCANDLE STRENGTH (last 3): ${live.candleStrength}`;
+    
+    realData += `\nFEAR/GREED: ${f || "?"} (${f<=10?"EXTREME_FEAR":f<=25?"FEAR":f<=45?"NEUTRAL":f<=75?"GREED":"EXTREME_GREED"})`;
+    realData += `\n═══ END VERIFIED DATA ═══`;
+  }
 
-SL HUNT: AGAINST overloaded crowd. Shorts>55%→LONG. Longs>60%→SHORT.
-Extract real numbers. Infer if unavailable (mark "Inferred:"). Score 12 hunt + 6 tech.
-${maxLev}x ISO, 3%risk=$${risk$}. DECISIVE: KYA/KAB/KAHAN/KAB_NIKLON.
+  return `You are analyzing ${coin} for a futures trade. Capital: $${cap}, Risk: 3% = $${risk$}, Max Leverage: ${maxLev}x ISOLATED.
+${realData}
 
-JSON ONLY:
-{"coin":"${coin}","price":${p||"<find>"},"price_24h_high":<>,"price_24h_low":<>,"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED","fear_greed":${f||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
-"slHunt":[{"n":"Long/Short Ratio","v":"<max 30ch>","p":<bool>,"d":"<1 line RU>"},{"n":"Open Interest","v":"<>","p":<bool>,"d":"<>"},{"n":"Funding Rate","v":"<>","p":<bool>,"d":"<>"},{"n":"Liq Cluster","v":"<>","p":<bool>,"d":"<>"},{"n":"RSI 4H","v":"<>","p":<bool>,"d":"<>"},{"n":"Whale Activity","v":"<>","p":<bool>,"d":"<>"},{"n":"Divergence","v":"<>","p":<bool>,"d":"<>"},{"n":"Key Level","v":"<>","p":<bool>,"d":"<>"},{"n":"Volume","v":"<>","p":<bool>,"d":"<>"},{"n":"Exchange Flow","v":"<>","p":<bool>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<>","p":<bool>,"d":"<>"},{"n":"Stacked Layers","v":"<>","p":<bool>,"d":"<>"}],
-"emaSSL":[{"n":"EMA 200 Daily","v":"<>","p":<bool>,"d":"<>"},{"n":"ADX 14","v":"<>","p":<bool>,"d":"<>"},{"n":"SSL Channel","v":"<>","p":<bool>,"d":"<>"},{"n":"EMA 20 vs Price","v":"<>","p":<bool>,"d":"<>"},{"n":"RSI vs 50","v":"<>","p":<bool>,"d":"<>"},{"n":"Candle Strength","v":"<>","p":<bool>,"d":"<>"}],
+IMPORTANT: Use the VERIFIED DATA above as your PRIMARY source. Only search web for:
+1. Recent news/events affecting ${coin}
+2. Whale activity & exchange flows (CryptoQuant/Coinglass)
+3. Liquidation heatmap clusters
+4. Support/resistance key levels
+
+SL HUNT STRATEGY: Trade AGAINST the overloaded crowd.
+- Longs > 60% → Market will HUNT longs DOWNWARD → go SHORT
+- Shorts > 55% → Market will HUNT shorts UPWARD → go LONG
+- Find where SL clusters are → that's the Hunt Zone
+
+Score these factors using VERIFIED DATA + web search:
+SL HUNT (12 points): L/S Ratio, OI, Funding, Liq Cluster, RSI 4H, Whale Activity, Divergence, Key Level, Volume, Exchange Flow, SL+Liq Overlap, Stacked Layers
+TECHNICAL (6 points): EMA 200 Daily, ADX 14, SSL Channel, EMA 20 vs Price, RSI vs 50, Candle Strength
+
+RESPOND IN JSON ONLY (no markdown):
+{"coin":"${coin}","price":${p||"<find>"},"price_24h_high":${live?.high24||"<>"},"price_24h_low":${live?.low24||"<>"},"dir":"LONG/SHORT/NO_TRADE","why":"<3 lines Roman Urdu>","huntType":"HUNTING_LONGS/HUNTING_SHORTS/NO_HUNT","crowd":"LONG_HEAVY/SHORT_HEAVY/BALANCED","crowdPct":"<e.g.58% shorts>","huntZone":"<price range>","mood":"${f<=10?"EXTREME_FEAR":f<=25?"FEAR":f<=45?"NEUTRAL":f<=75?"GREED":"EXTREME_GREED"}","fear_greed":${f||"<0-100>"},"news":{"impact":"BEARISH/BULLISH/NEUTRAL","headline":"<2 line RU>","factor":"<1 line>"},
+"slHunt":[{"n":"Long/Short Ratio","v":"${live?.lsLongPct||"<>"} longs","p":<bool>,"d":"<1 line RU>"},{"n":"Open Interest","v":"${live?.oiFormatted||"<>"}","p":<bool>,"d":"<>"},{"n":"Funding Rate","v":"${live?.fundingPct||"<>"}","p":<bool>,"d":"<>"},{"n":"Liq Cluster","v":"<search>","p":<bool>,"d":"<>"},{"n":"RSI 4H","v":"${live?.rsi4h||"<>"}","p":<bool>,"d":"<>"},{"n":"Whale Activity","v":"<search>","p":<bool>,"d":"<>"},{"n":"Divergence","v":"<analyze>","p":<bool>,"d":"<>"},{"n":"Key Level","v":"<search>","p":<bool>,"d":"<>"},{"n":"Volume","v":"${live?.volumeStatus||"<>"}","p":<bool>,"d":"<>"},{"n":"Exchange Flow","v":"<search>","p":<bool>,"d":"<>"},{"n":"SL+Liq Overlap","v":"<analyze>","p":<bool>,"d":"<>"},{"n":"Stacked Layers","v":"<analyze>","p":<bool>,"d":"<>"}],
+"emaSSL":[{"n":"EMA 200 Daily","v":"$${live?.ema200d||"<>"} (${live?.priceVsEma200||"?"})","p":<bool>,"d":"<>"},{"n":"ADX 14","v":"${live?.adx4h||"<>"}","p":<bool>,"d":"<>"},{"n":"SSL Channel","v":"${live?.sslChannel||"<>"}","p":<bool>,"d":"<>"},{"n":"EMA 20 vs Price","v":"$${live?.ema20d||"<>"} (${live?.priceVsEma20||"?"})","p":<bool>,"d":"<>"},{"n":"RSI vs 50","v":"${live?.rsi4h||"<>"}","p":<bool>,"d":"<>"},{"n":"Candle Strength","v":"${live?.candleStrength||"<>"}","p":<bool>,"d":"<>"}],
 "trade":{"entry":<price>,"sl":<price>,"sl_why":"<RU>","sl_bad":["<>","<>"],"tp1":{"p":<price>,"close":25},"tp2":{"p":<price>,"close":30},"tp3":{"p":<price>,"close":30},"tp4":{"trail":3,"close":15},"lev":${maxLev},"margin":<$>,"rr":"<1:X>","profit":{"low":<$>,"mid":<$>,"high":<$>},"timeline":"<>"},
 "dip":{"on":<bool>,"dir":"<>","entry":<price>,"sl":<price>,"tp":<price>,"profit":<$>},
 "levels":{"sup":[<prices>],"res":[<prices>]},
 "summary":"<RU: 1.KYA KARUN? 2.KAB? 3.KAHAN ENTRY? 4.KAB NIKLON?>"}`;
 }
+
 
 // ═══ COMPONENT ═══
 function App() {
@@ -424,8 +501,8 @@ function App() {
       // 24h high/low from CoinGecko if AI didn't provide
       if(!data.price_24h_high && liveData?.high24) data.price_24h_high = liveData.high24;
       if(!data.price_24h_low && liveData?.low24) data.price_24h_low = liveData.low24;
-      if(fear?.value) {
-        data.fear_greed = fear.value;
+      if(fear?.value || liveData?.fearGreed) {
+        data.fear_greed = liveData?.fearGreed || fear?.value || data.fear_greed;
         const fv = fear.value;
         data.mood = fv<=10?"EXTREME_FEAR":fv<=25?"FEAR":fv<=45?"NEUTRAL":fv<=75?"GREED":"EXTREME_GREED";
       }

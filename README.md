@@ -1,24 +1,27 @@
-# Crypto Trade Analyzer v2.0
+# Crypto Trade Analyzer v3.0 — 100% Real Data
 
-## Deploy (5 min, FREE)
+## What's New in v3
+- ALL indicators calculated from REAL Binance candle data (RSI, EMA, ADX, SSL)
+- Fear/Greed Index from Alternative.me API (EXACT)
+- Open Interest EXACT from Binance Futures
+- Long/Short Ratio + Top Trader Ratio from Binance
+- Taker Buy/Sell volume dominance
+- OI change tracking (increasing/decreasing)
+- AI receives VERIFIED data — no more guessing
 
-### Step 1: Get Gemini API Key (FREE)
-1. Go to https://aistudio.google.com/apikey
-2. Click "Create API Key" → Copy it
+## Deploy (5 min)
+1. Get Gemini API Key FREE: https://aistudio.google.com/apikey
+2. Replace ALL files in GitHub repo
+3. Vercel → Settings → Environment Variables → GEMINI_API_KEY
+4. Auto-deploy done!
 
-### Step 2: Upload ALL files to GitHub repo
-Replace ALL files in your repo with these files.
-
-### Step 3: Add API Key in Vercel
-1. Vercel → Your project → Settings → Environment Variables
-2. Add: GEMINI_API_KEY = your_key
-3. Optional: DEEPSEEK_API_KEY, QWEN_API_KEY, ANTHROPIC_API_KEY
-
-### Step 4: Redeploy
-Vercel auto-deploys on commit. Or go to Deployments → Redeploy.
-
-## Files
-- api/crypto.js — Binance real-time price + funding + OI + L/S
-- api/analyze.js — AI proxy (Gemini/DeepSeek/Qwen/Anthropic)
-- public/index.html — Trade Analyzer UI
-- vercel.json — Config
+## Data Sources
+- Price: Binance Spot (4 mirror endpoints + CoinGecko fallback)
+- Funding Rate: Binance Futures /fapi/v1/premiumIndex
+- Open Interest: Binance Futures /fapi/v1/openInterest
+- L/S Ratio: Binance Futures /futures/data/globalLongShortAccountRatio
+- Top Traders: Binance Futures /futures/data/topLongShortPositionRatio
+- Taker Volume: Binance Futures /futures/data/takerlongshortRatio
+- RSI/EMA/ADX/SSL: Calculated from Binance kline candles (4H + Daily)
+- Fear/Greed: Alternative.me /fng API
+- News/Whale: AI web search (Gemini Google Search)
