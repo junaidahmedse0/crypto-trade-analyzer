@@ -13,12 +13,12 @@ export default async function handler(req, res) {
     try {
       const r = await fetch(url);
       const txt = await r.text();
-      if (!r.ok) { errs.push(label + ':HTTP' + r.status + ':' + txt.substring(0,200)); return null; }
-      try { return JSON.parse(txt); } catch(e) { errs.push(label + ':PARSE:' + txt.substring(0,200)); return null; }
-    } catch (e) { errs.push(label + ':ERR:' + e.message); return null; }
+      if (!r.ok) { errs.push(label + ':' + r.status); return null; }
+      try { return JSON.parse(txt); } catch(e) { errs.push(label + ':parse_fail'); return null; }
+    } catch (e) { errs.push(label + ':' + e.message); return null; }
   }
 
-  // Try MULTIPLE Binance endpoints (some work from US, some don't)
+  // Try multiple Binance endpoints
   const priceUrls = [
     'https://data-api.binance.vision/api/v3/ticker/24hr?symbol=' + sym,
     'https://api.binance.com/api/v3/ticker/24hr?symbol=' + sym,
@@ -33,18 +33,17 @@ export default async function handler(req, res) {
     priceRes = null;
   }
 
-  // Futures endpoints (try multiple)
   const [fundingRes, oiRes, lsRes] = await Promise.all([
     sf('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + sym, 'funding'),
     sf('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + sym, 'oi'),
     sf('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' + sym + '&period=4h&limit=1', 'ls'),
   ]);
 
-  // Fallback: CoinGecko if Binance price fails
+  // CoinGecko fallback if Binance fails
   let cgPrice = null;
   if (!priceRes) {
-    const geckoIds = {BTC:'bitcoin',ETH:'ethereum',SOL:'solana',BNB:'binancecoin',XRP:'ripple',DOGE:'dogecoin',PEPE:'pepe',SUI:'sui',LINK:'chainlink',ADA:'cardano',AVAX:'avalanche-2',SHIB:'shiba-inu',ARB:'arbitrum',TRUMP:'official-trump'};
-    const gid = geckoIds[coin.toUpperCase()] || coin.toLowerCase();
+    const gids = {BTC:'bitcoin',ETH:'ethereum',SOL:'solana',BNB:'binancecoin',XRP:'ripple',DOGE:'dogecoin',PEPE:'pepe',SUI:'sui',LINK:'chainlink',ADA:'cardano',AVAX:'avalanche-2',SHIB:'shiba-inu',ARB:'arbitrum',TRUMP:'official-trump'};
+    const gid = gids[coin.toUpperCase()] || coin.toLowerCase();
     cgPrice = await sf('https://api.coingecko.com/api/v3/simple/price?ids=' + gid + '&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true', 'coingecko');
   }
 

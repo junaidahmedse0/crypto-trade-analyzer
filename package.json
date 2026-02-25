@@ -1,5 +1,1 @@
-{
-  "name": "crypto-trade-analyzer",
-  "version": "1.0.0",
-  "private": true
-}
+{ "name": "crypto-trade-analyzer", "version": "2.0.0", "private": true }

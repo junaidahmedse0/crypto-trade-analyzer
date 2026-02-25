@@ -1,33 +1,24 @@
-# 🎯 Crypto Trade Analyzer
+# Crypto Trade Analyzer v2.0
 
-**18-Point SL Hunt + EMA/SSL/RSI Dual Strategy AI Analyzer**
+## Deploy (5 min, FREE)
 
-## 🚀 Deploy (FREE — 5 minutes)
+### Step 1: Get Gemini API Key (FREE)
+1. Go to https://aistudio.google.com/apikey
+2. Click "Create API Key" → Copy it
 
-### Step 1: GitHub pe files upload karo
-Saari files is repo mein upload karo (drag & drop):
-```
-api/crypto.js      ← Binance real-time data
-api/analyze.js     ← AI analysis proxy
-public/index.html  ← Trade Analyzer UI
-vercel.json
-package.json
-```
+### Step 2: Upload ALL files to GitHub repo
+Replace ALL files in your repo with these files.
 
-### Step 2: Anthropic API Key lo (FREE)
-1. https://console.anthropic.com pe jao
-2. Sign up karo (free credits milte hain)
-3. API Keys → Create Key → copy karo
+### Step 3: Add API Key in Vercel
+1. Vercel → Your project → Settings → Environment Variables
+2. Add: GEMINI_API_KEY = your_key
+3. Optional: DEEPSEEK_API_KEY, QWEN_API_KEY, ANTHROPIC_API_KEY
 
-### Step 3: Vercel pe deploy karo
-1. https://vercel.com → Sign up with GitHub (free)
-2. "Add New Project" → `crypto-trade-analyzer` select karo
-3. **⚠️ IMPORTANT: Environment Variable add karo:**
-   - Settings → Environment Variables
-   - Name: `ANTHROPIC_API_KEY`
-   - Value: `sk-ant-...` (apni key paste karo)
-4. "Deploy" press karo
-5. ✅ 30 seconds mein LIVE!
+### Step 4: Redeploy
+Vercel auto-deploys on commit. Or go to Deployments → Redeploy.
 
-### Step 4: Use karo! 🎉
-URL kholo → Real-time Binance price + AI analysis = profit!
+## Files
+- api/crypto.js — Binance real-time price + funding + OI + L/S
+- api/analyze.js — AI proxy (Gemini/DeepSeek/Qwen/Anthropic)
+- public/index.html — Trade Analyzer UI
+- vercel.json — Config

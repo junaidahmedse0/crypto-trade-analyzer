@@ -19,20 +19,17 @@ export default async function handler(req, res) {
 
   const errors = [];
 
-  // ═══ 1. GEMINI (FREE + Google Search built-in) ═══
+  // 1. GEMINI (FREE + Google Search)
   if (geminiKey) {
     try {
-      const r = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            tools: [{ google_search: {} }],
-          }),
-        }
-      );
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+        }),
+      });
       const data = await r.json();
       if (!data.error && data.candidates?.[0]?.content?.parts) {
         let text = '';
@@ -45,7 +42,7 @@ export default async function handler(req, res) {
     } catch (e) { errors.push('gemini: ' + e.message); }
   }
 
-  // ═══ 2. DEEPSEEK (VERY CHEAP — OpenAI format) ═══
+  // 2. DEEPSEEK (VERY CHEAP)
   if (deepseekKey) {
     try {
       const r = await fetch('https://api.deepseek.com/chat/completions', {
@@ -54,11 +51,10 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model: 'deepseek-chat',
           messages: [
-            { role: 'system', content: 'You are a crypto market analyst. Always respond with valid JSON only. No markdown, no explanation. Be decisive with LONG/SHORT/NO_TRADE directions.' },
+            { role: 'system', content: 'You are a crypto market analyst. Always respond with valid JSON only. No markdown. Be decisive.' },
             { role: 'user', content: prompt }
           ],
-          max_tokens: 3000,
-          temperature: 0.7,
+          max_tokens: 3000, temperature: 0.7,
         }),
       });
       const data = await r.json();
@@ -69,7 +65,7 @@ export default async function handler(req, res) {
     } catch (e) { errors.push('deepseek: ' + e.message); }
   }
 
-  // ═══ 3. QWEN (CHEAP — OpenAI compatible via DashScope) ═══
+  // 3. QWEN (CHEAP)
   if (qwenKey) {
     try {
       const r = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
@@ -78,11 +74,10 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model: 'qwen-plus',
           messages: [
-            { role: 'system', content: 'You are a crypto market analyst. Always respond with valid JSON only. No markdown, no explanation. Be decisive with LONG/SHORT/NO_TRADE directions.' },
+            { role: 'system', content: 'You are a crypto market analyst. Always respond with valid JSON only. No markdown. Be decisive.' },
             { role: 'user', content: prompt }
           ],
-          max_tokens: 3000,
-          temperature: 0.7,
+          max_tokens: 3000, temperature: 0.7,
         }),
       });
       const data = await r.json();
@@ -93,34 +88,25 @@ export default async function handler(req, res) {
     } catch (e) { errors.push('qwen: ' + e.message); }
   }
 
-  // ═══ 4. ANTHROPIC (BEST QUALITY — Paid) ═══
+  // 4. ANTHROPIC (BEST — Paid)
   if (anthropicKey) {
     try {
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2500,
+          model: 'claude-sonnet-4-20250514', max_tokens: 2500,
           tools: [{ type: 'web_search_20250305', name: 'web_search' }],
           messages: [{ role: 'user', content: prompt }],
         }),
       });
       const data = await r.json();
       let text = '';
-      if (data.content) {
-        for (const block of data.content) {
-          if (block.type === 'text') text += block.text;
-        }
-      }
+      if (data.content) for (const b of data.content) if (b.type === 'text') text += b.text;
       if (text) return res.status(200).json({ success: true, text, provider: 'anthropic' });
-      errors.push('anthropic: ' + (data.error?.message || 'no text'));
+      errors.push('anthropic: no text');
     } catch (e) { errors.push('anthropic: ' + e.message); }
   }
 
-  return res.status(500).json({ success: false, error: 'All providers failed', details: errors });
+  return res.status(500).json({ success: false, error: 'All AI providers failed', details: errors });
 }

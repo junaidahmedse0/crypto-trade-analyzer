@@ -2,12 +2,8 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "functions": {
-    "api/crypto.js": {
-      "maxDuration": 10
-    },
-    "api/analyze.js": {
-      "maxDuration": 60
-    }
+    "api/crypto.js": { "maxDuration": 10 },
+    "api/analyze.js": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },

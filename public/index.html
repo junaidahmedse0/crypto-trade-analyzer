@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Crypto Trade Analyzer — SL Hunt + EMA SSL RSI</title>
+  <meta name="description" content="18-Point AI Trade Analyzer with real-time Binance data">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #06040e; overflow-x: hidden; }
-    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-    @keyframes pulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+    @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    @keyframes pulse { 0%,100% { opacity:0.7; } 50% { opacity:1; } }
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: #06040e; }
     ::-webkit-scrollbar-thumb { background: #1a1230; border-radius: 4px; }
@@ -160,23 +161,9 @@ async function getBinanceREST(coin) {
   return null;
 }
 
-// ═══ COINCAP.IO — free, no key, CORS-friendly ═══
+// ═══ COINCAP.IO — disabled in artifact (DNS blocked) ═══
 async function getCoinCapPrice(coin) {
-  const ids = {BTC:"bitcoin",ETH:"ethereum",SOL:"solana",BNB:"binance-coin",XRP:"xrp",ADA:"cardano",AVAX:"avalanche",DOGE:"dogecoin",MATIC:"polygon",DOT:"polkadot",LINK:"chainlink",SHIB:"shiba-inu",PEPE:"pepe",WIF:"dogwifhat",ARB:"arbitrum"};
-  const id = ids[coin] || coin.toLowerCase();
-  try {
-    const r = await fetch(`https://api.coincap.io/v2/assets/${id}`, {signal: AbortSignal.timeout(3000)});
-    if(!r.ok) return null;
-    const d = await r.json();
-    const a = d.data;
-    if(!a?.priceUsd) return null;
-    return {
-      price: parseFloat(a.priceUsd),
-      change24: parseFloat(a.changePercent24Hr)||0,
-      vol24: parseFloat(a.volumeUsd24Hr)||0,
-      mcap: parseFloat(a.marketCapUsd)||0,
-    };
-  } catch { return null; }
+  return null; // CoinCap blocked in Claude sandbox, works on deployed site
 }
 
 // ═══ COINGECKO SIMPLE (faster, less rate-limited) ═══
@@ -268,27 +255,23 @@ async function getLiveData(coin) {
 }
 
 // ═══ AI CALL (with 60s timeout) ═══
-async function callAI(prompt) {
+async function callAI(promptText) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), 90000);
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+    const r = await fetch(BACKEND_URL + "/api/analyze", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
       signal: controller.signal,
-      body: JSON.stringify({
-        model:"claude-sonnet-4-20250514", max_tokens:2500,
-        tools:[{type:"web_search_20250305",name:"web_search"}],
-        messages:[{role:"user",content:prompt}]
-      })
+      body: JSON.stringify({ prompt: promptText })
     });
     clearTimeout(timeout);
     const d = await r.json();
-    let t = "";
-    if(d.content) for(const b of d.content) if(b.type==="text") t += b.text;
-    return t;
+    if(!d.success) throw new Error(d.error || "AI call failed — check Vercel env vars");
+    return d.text;
   } catch(e) {
     clearTimeout(timeout);
-    if(e.name === 'AbortError') throw new Error("AI timeout — try again");
+    if(e.name === "AbortError") throw new Error("AI timeout — try again");
     throw e;
   }
 }
@@ -1474,6 +1457,7 @@ function NoTrade({s,why}){
 }
 
 const inp = {width:"100%",padding:"6px 8px",borderRadius:5,border:"1px solid #1a1230",background:"#0d0918",color:"#f0eaff",fontSize:10.5,outline:"none",boxSizing:"border-box",marginTop:3};
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
