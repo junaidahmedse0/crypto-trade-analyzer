@@ -19,27 +19,34 @@ export default async function handler(req, res) {
 
   const errors = [];
 
-  // 1. GEMINI (FREE + Google Search)
+  // 1. GEMINI (FREE — try Flash first, then Flash-Lite for higher quota)
   if (geminiKey) {
-    try {
-      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          tools: [{ google_search: {} }],
-        }),
-      });
-      const data = await r.json();
-      if (!data.error && data.candidates?.[0]?.content?.parts) {
-        let text = '';
-        for (const part of data.candidates[0].content.parts) {
-          if (part.text) text += part.text;
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    for (const model of geminiModels) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            tools: [{ google_search: {} }],
+          }),
+        });
+        const data = await r.json();
+        if (data.error?.code === 429) {
+          errors.push('gemini-' + model + ': quota exhausted, trying next');
+          continue; // Try next model
         }
-        if (text) return res.status(200).json({ success: true, text, provider: 'gemini' });
-      }
-      errors.push('gemini: ' + (data.error?.message || 'no text'));
-    } catch (e) { errors.push('gemini: ' + e.message); }
+        if (!data.error && data.candidates?.[0]?.content?.parts) {
+          let text = '';
+          for (const part of data.candidates[0].content.parts) {
+            if (part.text) text += part.text;
+          }
+          if (text) return res.status(200).json({ success: true, text, provider: 'gemini-' + model });
+        }
+        errors.push('gemini-' + model + ': ' + (data.error?.message || 'no text'));
+      } catch (e) { errors.push('gemini-' + model + ': ' + e.message); }
+    }
   }
 
   // 2. DEEPSEEK (VERY CHEAP)
