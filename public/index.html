@@ -275,24 +275,21 @@ async function getLiveData(coin) {
 }
 
 // ═══ AI CALL (with 60s timeout) ═══
-async function callAI(prompt) {
+async function callAI(promptText) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), 90000);
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+    // Use backend proxy (no CORS issues)
+    const r = await fetch(`${BACKEND_URL}/api/analyze`, {
+      method:"POST", 
+      headers:{"Content-Type":"application/json"},
       signal: controller.signal,
-      body: JSON.stringify({
-        model:"claude-sonnet-4-20250514", max_tokens:2500,
-        tools:[{type:"web_search_20250305",name:"web_search"}],
-        messages:[{role:"user",content:prompt}]
-      })
+      body: JSON.stringify({ prompt: promptText })
     });
     clearTimeout(timeout);
     const d = await r.json();
-    let t = "";
-    if(d.content) for(const b of d.content) if(b.type==="text") t += b.text;
-    return t;
+    if(!d.success) throw new Error(d.error || "AI call failed");
+    return d.text;
   } catch(e) {
     clearTimeout(timeout);
     if(e.name === 'AbortError') throw new Error("AI timeout — try again");

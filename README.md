@@ -2,66 +2,32 @@
 
 **18-Point SL Hunt + EMA/SSL/RSI Dual Strategy AI Analyzer**
 
-Real-time Binance data · AI-powered analysis · Roman Urdu
+## 🚀 Deploy (FREE — 5 minutes)
 
-## 🚀 Deploy on Vercel (FREE — 2 minutes)
-
-### Method 1: GitHub + Vercel (Recommended)
-
-1. **GitHub pe repo banao:**
-   - GitHub.com → New Repository → naam: `crypto-trade-analyzer`
-   - Saari files upload karo (drag & drop):
-     ```
-     api/crypto.js
-     public/index.html
-     vercel.json
-     package.json
-     ```
-
-2. **Vercel pe deploy karo:**
-   - https://vercel.com pe jao
-   - "Sign up with GitHub" karo
-   - "Add New Project" → apna `crypto-trade-analyzer` repo select karo
-   - "Deploy" button press karo
-   - ⏳ 30 seconds wait karo
-   - ✅ Live URL milega: `https://crypto-trade-analyzer-xxx.vercel.app`
-
-3. **Done!** URL kholo aur use karo
-
-### Method 2: Vercel CLI (Terminal se)
-
-```bash
-npm i -g vercel
-cd crypto-trade-analyzer
-vercel
+### Step 1: GitHub pe files upload karo
+Saari files is repo mein upload karo (drag & drop):
+```
+api/crypto.js      ← Binance real-time data
+api/analyze.js     ← AI analysis proxy
+public/index.html  ← Trade Analyzer UI
+vercel.json
+package.json
 ```
 
-## 📡 Features
+### Step 2: Anthropic API Key lo (FREE)
+1. https://console.anthropic.com pe jao
+2. Sign up karo (free credits milte hain)
+3. API Keys → Create Key → copy karo
 
-| Feature | Source | Status |
-|---------|--------|--------|
-| Real-time Price | Binance API (backend) | ✅ Exact |
-| Funding Rate | Binance Futures API | ✅ Real-time |
-| Open Interest | Binance Futures API | ✅ Real-time |
-| L/S Ratio | Binance Futures API | ✅ Real-time |
-| Fear/Greed Index | alternative.me | ✅ Real-time |
-| AI Analysis | Claude Sonnet | ✅ 18-point scoring |
-| Manual Price | User input | ✅ Override option |
+### Step 3: Vercel pe deploy karo
+1. https://vercel.com → Sign up with GitHub (free)
+2. "Add New Project" → `crypto-trade-analyzer` select karo
+3. **⚠️ IMPORTANT: Environment Variable add karo:**
+   - Settings → Environment Variables
+   - Name: `ANTHROPIC_API_KEY`
+   - Value: `sk-ant-...` (apni key paste karo)
+4. "Deploy" press karo
+5. ✅ 30 seconds mein LIVE!
 
-## 💰 Cost: FREE
-
-- Vercel: Free tier (100K requests/month)
-- Binance API: Free, no key needed
-- Claude API: Included via artifact
-
-## 📁 File Structure
-
-```
-├── api/
-│   └── crypto.js       ← Backend: Binance data (serverless)
-├── public/
-│   └── index.html      ← Frontend: Trade Analyzer
-├── vercel.json         ← Vercel config
-├── package.json        ← Project config
-└── README.md           ← This file
-```
+### Step 4: Use karo! 🎉
+URL kholo → Real-time Binance price + AI analysis = profit!
